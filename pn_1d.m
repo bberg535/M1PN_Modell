@@ -1,0 +1,117 @@
+% Messung
+tAll = tic;
+
+% Größen für die Diskretisierung
+N = 3;
+dt = 0.001;
+dz = 0.002;    % CFL: dt < dz
+Nz = 2/dz;
+
+% Berechnung der Relaxtions- und Fluxmatrizen (s. (10))
+A = diag((1:N)./(1:2:2*N-1),1) + diag((1:N)./(3:2:2*N+1),-1);
+Q = diag([0; ones(N,1)]);
+
+% Berechnung der Diagonalisierung über Eigenwerte und Legendre-Polynome (s.
+% (11) und (12))
+[lambda,w] = gausslegendre(N+1);
+P = legpoly_eval(lambda, N);
+G = diag(2./(2.*(0:N)+1));       % Orthogonalität der Legendre Polynome
+R = P*diag(w);
+L = (G \ P).';
+
+% Matrizen für die Diskretisierung, dabei Positivitätserhaltung (s. (19))
+Lambda = diag(lambda);
+Lambdaplus = max(Lambda, 0);
+Lambdaminus = min(Lambda, 0);
+C = eye(N+1) - dt/dz.*(Lambdaplus-Lambdaminus);
+Cplus = -dt/dz.*Lambdaminus;
+Cminus = dt/dz.*Lambdaplus;
+
+% Faktoren 
+sigma = 1;
+gamma = 1/(1+sigma*dt);
+
+% Anfangswerte, wobei v = L * u (s. unter Gleichung (12))
+rho0 = [1/dz;zeros(Nz-1,1)];
+u = zeros(N+1, Nz);
+u(1,:) = rho0.'; 
+v = L * u;
+
+% Zeitschleife
+for t = 0:dt:1
+    % Indexshift für periodische Randwerte
+    sl = [Nz, 1:Nz-1];
+    sr = [2:Nz, 1];
+
+    % Berechnung nötig für Gleichung (17) und (20)
+    cd = C * v + Cminus * v(:,sl) + Cplus * v(:,sr);
+
+    % Gleichung (20)
+    rho = w.'*cd;
+
+    % Gleichung (17)
+    v = gamma*cd + (1-gamma)*rho/2;
+end
+
+tEnd = toc(tAll);
+
+% Stützpunkte für's Plotten
+z = (dz/2 : dz : 2 - dz/2);
+
+% Rücktransformation von u
+u = R*v;
+
+% Berechnung von F über (6) und das Minimum (21) 
+c = G \ u;
+mu = linspace(-1,1,1000);
+p_vec = legpoly_eval(mu,N);
+F_star = min(c.'*p_vec, [], 2);
+[~, index] = min(F_star);
+
+
+%% Plots
+figure;
+subplot(2,2,1)
+title('(a) Components of v');
+hold on
+for i=1:N+1
+    plot(z, v(i,:));
+end
+hold off
+
+subplot(2,2,2)
+plot(z,rho); 
+xlabel('x'); title('(b) Scalar flux, \rho');
+
+subplot(2,2,3)
+plot(z, F_star); title('(c) min_{\mu\in[-1,1]}F(u(z,t=1),\mu)'); xlabel('x');
+
+subplot(2,2,4)
+hold on
+plot(mu, p_vec.' * c(:,index)); title('(d) P_3 reconstruction at z = 0.68. Circles highlight quadrature points.');
+xlabel('\mu')
+scatter(lambda, v(:,index));
+plot(mu, zeros(size(mu,2),1));
+hold off
+
+
+function [x,w] = gausslegendre(n)
+    i = (1:n-1)';
+    beta = i./sqrt(4*i.^2 - 1);
+    J = diag(zeros(n,1)) + diag(beta,1) + diag(beta,-1);
+    [V,D] = eig(J);
+    [x,idx] = sort(diag(D));
+    V = V(:,idx);
+    w = 2*(V(1,:)'.^2);
+end
+
+function P = legpoly_eval(mu,N)
+    mu = mu(:).';
+    M = numel(mu);
+    P = zeros(N+1,M);
+    P(1,:) = 1;
+    if N>=1, P(2,:) = mu; end
+    for l = 1:N-1
+        P(l+2,:) = ((2*l+1)*mu.*P(l+1,:) - l*P(l,:))/(l+1);
+    end
+end
