@@ -17,17 +17,18 @@ dt = 0.001;
 dz = 0.002;    % CFL: dt < dz
 Nz = 2/dz;
 cfl = dt/dz;
-T = 1;
+T = 1.5;
 
 % Flussfunktion
 flux = @(u) ([u(2,:); u(3,:)]); fluxj = @(u) 1;
 
 % Absorptions- und Streuungsterm
-sigma_a = (dz .* ones(Nz,1))';
-sigma_s = (dz .* ones(Nz,1))';
+sigma_a = 0 * (dz .* ones(Nz,1))';
+sigma_s = 0 * (dz .* ones(Nz,1))';
+source_strength = 0.0;
 
 % Anfangswerte
-rho0 = [1/dz;zeros(Nz-2,1); 1/dz];
+rho0 = [1/dz;zeros(Nz-1,1)];
 u = zeros(N+1, Nz);
 u(1,:) = rho0.'; 
 
@@ -45,7 +46,7 @@ for t = 0:dt:T
     end  
     
     % Zeitschritt mit SSP Heuns Method
-    u = advance_m1(u, dt, dz, flux, fluxj, Nz, sigma_a, sigma_s, method);
+    u = advance_m1(u, dt, dz, flux, fluxj, Nz, sigma_a, sigma_s, method, source_strength);
     mass = sum(u(1,:)) * dz; 
     fprintf('t = %.3f, mass = %.10e\n', t, mass);
 end

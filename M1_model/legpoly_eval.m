@@ -1,4 +1,5 @@
 function P = legpoly_eval(mu,N)
+% Berechnung der Legendre-Polynome durch die Bonnet-Formel
     mu = mu(:).';
     M = numel(mu);
     P = zeros(N+1,M);

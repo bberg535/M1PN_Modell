@@ -1,0 +1,42 @@
+function [u_new, alpha_cache] = euler_transport(u, alpha_cache, dt, dx, opts, Ppos, Pneg, Pfull, wmu_pos, wmu_neg)
+% One forward Euler step for transport part:
+% u_t + (F_{i+1/2}-F_{i-1/2})/dx = 0
+% with kinetic upwind flux.
+
+nM = size(u,1);
+Nx = size(u,2);
+
+% Boundary moment for vacuum: isotropic with rho_vac
+ub = zeros(nM,1);
+ub(1) = opts.rho_vac;
+
+% Positive und negative Flüsse berechnen für (4.13)
+if strcmpi(opts.model,'PN')
+    [Fpos, Fneg] = flux_parts_PN(u, opts.N, opts.quad, Ppos, Pneg, wmu_pos, wmu_neg);
+else
+    [alpha_cache, ok] = multipliers_MN(u, alpha_cache, opts, Pfull);
+    if ~ok
+        warning('MN multipliers: Newton failed in at least one cell. Falling back to isotropic in those cells.');
+    end
+    [Fpos, Fneg] = flux_parts_MN(alpha_cache, opts.quad, Ppos, Pneg, wmu_pos, wmu_neg);
+end
+
+% Boundary flux parts (vacuum isotropic)
+if strcmpi(opts.model,'PN')
+    [Fpos_b, Fneg_b] = flux_parts_PN(ub, opts.N, opts.quad, Ppos, Pneg, wmu_pos, wmu_neg);
+else
+    alpha_b = zeros(nM,1); alpha_b(1)=log(opts.rho_vac/2);
+    [Fpos_b, Fneg_b] = flux_parts_MN(alpha_b, opts.quad, Ppos, Pneg, wmu_pos, wmu_neg);
+end
+
+% Assemble interface fluxes: G_{i+1/2} = Fpos_i + Fneg_{i+1}
+G = zeros(nM, Nx+1);
+G(:,1)     = Fpos_b + Fneg(:,1);
+for i=1:Nx-1
+    G(:,i+1) = Fpos(:,i) + Fneg(:,i+1);
+end
+G(:,Nx+1)  = Fpos(:,Nx) + Fneg_b;
+
+% Finite volume update
+u_new = u - (dt/dx) * (G(:,2:end) - G(:,1:end-1));
+end

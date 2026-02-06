@@ -1,7 +1,7 @@
 % Messung
 tAll = tic;
 
-ilim = 0;
+ilim = 1;
 
 % Größen für die Diskretisierung
 N = 3;
@@ -32,7 +32,7 @@ Cplus = -dt/dz.*Lambdaminus;
 Cminus = dt/dz.*Lambdaplus;
 
 % Faktoren 
-sigma = 1;
+sigma = 0;
 gamma = 1/(1+sigma*dt);
 
 % Anfangswerte, wobei v = L * u (s. unter Gleichung (12))
@@ -60,8 +60,7 @@ for t = 0:dt:1
     fLF=fCD-0.5*lambdaMCL.*(vrc-vlc); % Gleichung (4)
 
     % Lax-Wendroff flux   
-    %fLW=fCD-0.5*cfl*(lambdaMCL.^2).*(vrc-vlc);
-    fLW = flux(0.5*(vrc+vlc) - cfl * 0.5 * flux(vrc) - flux(vlc));
+    fLW=fCD-0.5*cfl*(lambdaMCL.^2).*(vrc-vlc);
 
     if ilim == 1
 
@@ -115,7 +114,7 @@ F_star = min(c.'*p_vec, [], 2);
 
 %% Plots
 figure;
-plot(z,u(1:3,:))
+plot(z,u)
 legend('Moment 1','Moment 2','Moment 3');
 
 figure;

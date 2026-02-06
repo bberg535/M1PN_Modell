@@ -1,8 +1,13 @@
 function u = advance_pn(un, N, method, dt, dz)
-Nz = size(un,2); cfl = dt / dz;
+% Berechnung der Rechten Seite des PN-Modells aufgebaut nach 
+%
+% https://doi.org/doi/10.1137/15M1052871
+%
+% Mit FV-Verfahren LLF, LW oder MCL
+
+Nz = size(un,2) - 1; cfl = dt / dz;
 ip0c = [1:Nz]'; ip1c = [2:Nz 1]'; im1c = [Nz 1:Nz-1]';
-
-
+rhs_v = zeros(N+1, Nz + 1);
 
 % Transformations- und Basisvektoren/Matrizen
 [xi,w] = gausslegendre(N+1);
@@ -11,22 +16,20 @@ G = diag(2./(2.*(0:N)+1));
 R = P*diag(w);
 L = (G \ P).';
 
-flux = @(v) (xi.*v); fluxj = @(v) xi;
-
+% Diagonalisiere das System per Basistransformation
 v = L * un;
+vlc = v(:,ip0c); vrc = v(:,ip1c);
 
-vlc=v(:,ip0c); vrc=v(:,ip1c); ve=0.5*(vlc+vrc);
-
+% Flussfunktion und -geschwindigkeit
+flux = @(v) (xi.*v); fluxj = @(v) xi;
+%flux = @(v) (v); fluxj = @(v) 1;
 lambdaMCL=max(abs(fluxj(vlc)),abs(fluxj(vrc)));
-
-sigma = 1;
-gamma = 1/(1+sigma*dt);
 
 % Central difference flux
 fCD=0.5*(flux(vrc)+flux(vlc));
 
 % Local Lax-Friedrichs flux 
-fLF=fCD-0.5*lambdaMCL.*(vrc-vlc); % Gleichung (4)
+fLF=fCD-0.5*lambdaMCL.*(vrc-vlc);
 
 % Lax-Wendroff flux   
 fLW=fCD-0.5*cfl*(lambdaMCL.^2).*(vrc-vlc);
@@ -34,7 +37,7 @@ fLW=fCD-0.5*cfl*(lambdaMCL.^2).*(vrc-vlc);
 if method == 1
 
     % Antidiffusive flux
-    fAe=fLF-fLW; % Gleichung (11)
+    fAe=fLF-fLW;
 
     % Local bounds
     umax=max(v(:,im1c),max(v(:,ip0c),v(:,ip1c)));
@@ -48,7 +51,7 @@ if method == 1
         +max(min(0,fAe),max(lambdaMCL.*umin(:,ip0c)-wbar,wbar-lambdaMCL.*umax(:,ip1c)));
 
     % Flux correction
-    fMCL=fLF-fAe; % Gleichung (18)
+    fMCL=fLF-fAe;
 
 elseif method == -1
 
@@ -60,9 +63,9 @@ else
 
 end
 
-rho = w.'*(v(:,ip0c)-cfl*(fMCL(:,ip0c)-fMCL(:,im1c)));
+% Berechne Rechte-Seite
+rhs_v(:,ip0c) = -(fMCL(:,ip0c) - fMCL(:,im1c)) / dz;
 
-v(:,ip0c)=gamma*(v(:,ip0c)-cfl*(fMCL(:,ip0c)-fMCL(:,im1c))) + (1-gamma)*rho/2;
-
-u = R * v;
+% Transformiere in den Momentenraum
+u = R * rhs_v;  
 end

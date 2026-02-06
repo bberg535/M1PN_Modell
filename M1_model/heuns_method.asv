@@ -1,5 +1,5 @@
 function [u, uPN] = heuns_method(u, uPN, dt, dz, flux, nec, sigma_a, sigma_s, ilim, N, source_strength, legpols)
-    ip0c=[1:nec]'; ip1c=[2:nec 1]'; im1c=[nec 1:nec-1]';
+    ip0c=[1:nec]'; ip1c=[2: 1]'; im1c=[Nz 1:Nz-1]';
 
     switch ilim
         case 1
@@ -17,7 +17,7 @@ function [u, uPN] = heuns_method(u, uPN, dt, dz, flux, nec, sigma_a, sigma_s, il
     %rhs1 = -(f1 - f1(:,im1c))/dz + source_term(Nz, source_strength) - reaction(u, sigma_a, sigma_s);
     
     % u^n Tilde
-    u1 = u + dt * f1;
+    u1(:,ip0c) = u(:,ip0c) + dt * f1;
 
     % Parallel uPN^n Tilde berechnen
     k1PN = advance_pn(uPN, N, ilim, dt, dz);
@@ -28,7 +28,7 @@ function [u, uPN] = heuns_method(u, uPN, dt, dz, flux, nec, sigma_a, sigma_s, il
     f2 = real_HO_flux(uPN1, u1, dt, dz, method, flux, nec, N, source_strength, sigma_a, sigma_s);
     %rhs2 = -(f2 - f2(:,im1c))/dz + source_term(Nz, source_strength) - reaction(u1, sigma_a, sigma_s);
 
-    u2 = u1 + dt * f2;
+    u2(:,ip0c) = u1(:,ip0c) + dt * f2;
 
     k2PN = advance_pn(uPN1, N, ilim, dt, dz);
     uPN2 = uPN1 + dt * k2PN;

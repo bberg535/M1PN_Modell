@@ -10,8 +10,8 @@ function u = MCL(un, dt, dx, f, lambda, psi2, Nz)
 
     % Flüsse berechnen
     fCD = 0.5*(f([urc; psi2(ip1c)])+f([ulc; psi2(ip0c)]));
-    fLF = fCD - 0.5 * lambda * (urc - ulc);
-    fLW = fCD - 0.5 * dt/dx * lambda^2 * (urc - ulc);
+    fLF = fCD - 0.5 * lambda .* (urc - ulc);
+    fLW = fCD - 0.5 * dt/dx * lambda.^2 .* (urc - ulc);
 
     % Anti-Diffusiver Fluss Gleichung (11)
     fAe = fLF - fLW;

@@ -32,7 +32,7 @@ Cplus = -dt/dz.*Lambdaminus;
 Cminus = dt/dz.*Lambdaplus;
 
 % Faktoren 
-sigma = 1;
+sigma = 0;
 gamma = 1/(1+sigma*dt);
 
 % Anfangswerte, wobei v = L * u (s. unter Gleichung (12))
@@ -44,6 +44,7 @@ v = L * u;
 lambdamax = max(xi);
 
 flux = @(v) (xi.*v); fluxj = @(v) xi;
+%flux = @(v) (v); fluxj = @(v) ones(size(v,1),1);
 
 ip0c=[1:Nz]'; ip1c=[2:Nz 1]'; im1c=[Nz 1:Nz-1]';
 
@@ -113,11 +114,13 @@ F_star = min(c.'*p_vec, [], 2);
 
 
 %% Plots
-figure
-
 figure;
-plot(z,u(1:3,:))
-legend('Moment 1','Moment 2','Moment 3');
+hold on
+plot(z,u(1,:))
+legend('Moment 1','Moment 2','Moment 3', 'Moment 4');
+%plot(z, p_vec .* c)
+%plot(z,  xi.' * (legpols .* p_vec .* c))
+hold off
 
 figure;
 subplot(2,2,1)
