@@ -1,27 +1,35 @@
-function rhs = flux_limit(HO_Flux, LO_Flux, Nz, u, psi2, dt, dz, source_strength, sigma_a, sigma_s)
-    ip0c=[1:Nz]'; ip1c=[2:Nz 1]'; im1c=[Nz 1:Nz-1]';
+function Gstar = flux_limit(HO_Flux, LO_Flux, nec, u, psi2, ~, ~, ~, ~, ~)
+    ip0c = 1:nec;
+    ip1c = [2:nec, 1];
+    im1c = [nec, 1:nec-1];
 
-    rhs = zeros(2, Nz+1);
-    flux = [u(2,:); psi2];
-    react = reaction(u, sigma_a, sigma_s);
-    source = source_term(Nz+1, source_strength);
-    fAe = HO_Flux - LO_Flux; % Gleichung (11)
+    if size(HO_Flux, 2) ~= nec || size(LO_Flux, 2) ~= nec
+        error('flux_limit:dimensionMismatch', ...
+            'Expected HO/LO interface fluxes with nec=%d columns.', nec);
+    end
 
-    % Local bounds
-    umax = max(u(:,im1c), max(u(:,ip0c), u(:,ip1c))); % Gleichung (24a) mit Gleichung (22)
-    umin = min(u(:,im1c), min(u(:,ip0c), u(:,ip1c))); % Gleichung (24a) mit Gleichung (22) 
+    u_act = u(:, 1:nec);
+    psi2_act = psi2(1:nec);
+    flux = [u_act(2, :); psi2_act];
 
-    % Scaled bar states
-    % Im Buch (3.72) aber mit lambda = 2*d_ij multipliziert
-    %wbar = 0.5 * (u(:,ip0c)+u(:,ip1c)) - 0.5 * (flux(:,ip1c) - flux(:,ip0c)) + source(:, ip0c) - react(:, ip0c); 
-    wbar = 0.5 * (u(:,ip0c)+u(:,ip1c)) - 0.5 * (flux(:,ip1c) - flux(:,ip0c)); 
+    % Antidiffusiver Zielfluss (MCL-konform: LO minus HO)
+    fAe = LO_Flux - HO_Flux;
+    % Die erste M1-Gleichung (rho_t + (u1)_x = ...) bleibt im LO-M1-Flux.
+    % PN-Korrektur wird nur auf den Impulsfluss (zweite Komponente) angewandt.
+    fAe(1, :) = 0;
 
-    % Flux limiting
-    % f_ij max (Unter Gleichung (3.77))
-    fAe = min(max(0,fAe), min(umax(:,ip0c) - wbar, wbar - umin(:,ip1c))) ...
-        + max(min(0,fAe), max(umin(:,ip0c) - wbar, wbar - umax(:,ip1c))); % Gleichung (27)
+    % Lokale Schranken auf Knotenebene
+    umax = max(u_act(:, im1c), max(u_act(:, ip0c), u_act(:, ip1c)));
+    umin = min(u_act(:, im1c), min(u_act(:, ip0c), u_act(:, ip1c)));
 
-    % Flux correction
+    % Low-order Bar-States auf Interfaces
+    wbar = 0.5 * (u_act(:, ip0c) + u_act(:, ip1c)) ...
+         - 0.5 * (flux(:, ip1c) - flux(:, ip0c));
+
+    % Limiter fuer den antidiffusiven Fluss
+    fAe = min(max(0, fAe), min(umax(:, ip0c) - wbar, wbar - umin(:, ip1c))) ...
+        + max(min(0, fAe), max(umin(:, ip0c) - wbar, wbar - umax(:, ip1c)));
+
+    % Vollstaendiger limitierter Interface-Fluss
     Gstar = LO_Flux - fAe;
-    rhs(:,ip0c) = 1/dz * (wbar(:,im1c) + Gstar(:,im1c) - u(:,ip0c) + wbar(:,ip1c) - Gstar(:,ip1c) - u(:,ip0c));
 end

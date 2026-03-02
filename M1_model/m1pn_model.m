@@ -40,6 +40,8 @@ u = zeros(N+1, nne);
 uPN = zeros(NPN+1, nne);
 u(1,:) = rho0.'; 
 uPN(1,:) = rho0.';
+u(:, nne) = u(:, 1);
+uPN(:, nne) = uPN(:, 1);
 
 if cont_plot
     psi2 = calc_psi2(u);
@@ -55,11 +57,15 @@ for t = 0:dt:T
     % Least Squares Fitting
 
     % Norm- und Positivitätsüberprüfung
-    mass = sum(u(1,:)) * dz; 
+    if any(~isfinite(u(:))) || any(~isfinite(uPN(:))) || any(~isreal(u(:)))
+        error('m1pn_model:invalidState', 'NaN/Inf/komplexer Zustand bei t=%.3f', t);
+    end
+
+    mass = sum(u(1,1:nec)) * dz;
     fprintf('t = %.3f, mass = %.10e\n', t, mass);
-    [min_pn, idx] = min(uPN(1,:));
+    [min_pn, idx] = min(uPN(1,1:nec));
     fprintf('min rho_M1 = %.3e, min rho_PN = %.3e at %d\n ', ...
-        min(u(1,:)), min_pn, idx);
+        min(u(1,1:nec)), min_pn, idx);
 
     % Kontinuierlicher Plot
     if cont_plot
