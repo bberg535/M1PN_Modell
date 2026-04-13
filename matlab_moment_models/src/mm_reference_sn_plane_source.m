@@ -14,6 +14,7 @@ sigma_s = cfg_ref.sigma_s;
 sigma_a = cfg_ref.sigma_a;
 Q = cfg_ref.Q;
 psi_vac = cfg_ref.psi_vac_density;
+par_cfg = get_field_or(cfg_ref, 'parallel', struct());
 
 edges = linspace(zL, zR, nCells + 1);
 z = 0.5 * (edges(1:end-1) + edges(2:end));
@@ -21,6 +22,8 @@ dz = edges(2) - edges(1);
 
 [mu, w] = gauss_legendre(nMu, -1, 1);
 maxSpeed = max(abs(mu));
+par_mu = mm_parallel_context(par_cfg, nMu, 'directions');
+use_par_mu = par_mu.use_parallel;
 
 psi = psi_vac * ones(nMu, nCells);
 
@@ -64,21 +67,40 @@ ref.w = w;
         src = sigma_s * (0.5 * rho_state - psi_state) - sigma_a * psi_state + Q;
 
         adv = zeros(size(psi_state));
-        for m = 1:nMu
-            mmu = mu(m);
-            row = psi_state(m, :);
+        if use_par_mu
+            parfor m = 1:nMu
+                mmu = mu(m);
+                row = psi_state(m, :);
 
-            if mmu >= 0
-                F = zeros(1, nCells + 1);
-                F(1) = mmu * psi_vac;
-                F(2:end) = mmu * row;
-            else
-                F = zeros(1, nCells + 1);
-                F(1:nCells) = mmu * row;
-                F(end) = mmu * psi_vac;
+                if mmu >= 0
+                    F = zeros(1, nCells + 1);
+                    F(1) = mmu * psi_vac;
+                    F(2:end) = mmu * row;
+                else
+                    F = zeros(1, nCells + 1);
+                    F(1:nCells) = mmu * row;
+                    F(end) = mmu * psi_vac;
+                end
+
+                adv(m, :) = -(F(2:end) - F(1:end-1)) / dz;
             end
+        else
+            for m = 1:nMu
+                mmu = mu(m);
+                row = psi_state(m, :);
 
-            adv(m, :) = -(F(2:end) - F(1:end-1)) / dz;
+                if mmu >= 0
+                    F = zeros(1, nCells + 1);
+                    F(1) = mmu * psi_vac;
+                    F(2:end) = mmu * row;
+                else
+                    F = zeros(1, nCells + 1);
+                    F(1:nCells) = mmu * row;
+                    F(end) = mmu * psi_vac;
+                end
+
+                adv(m, :) = -(F(2:end) - F(1:end-1)) / dz;
+            end
         end
 
         rhs = adv + src;
@@ -98,4 +120,12 @@ w = 2 * (V(1, :)').^2;
 
 x = 0.5 * ((b - a) * x + (a + b));
 w = 0.5 * (b - a) * w;
+end
+
+function v = get_field_or(s, name, default)
+if isfield(s, name)
+    v = s.(name);
+else
+    v = default;
+end
 end

@@ -55,6 +55,13 @@ opt_cfg = get_field_or(step_cfg, 'optimizer', struct());
 rec_cfg = get_field_or(step_cfg, 'reconstruction', struct('use_characteristic', true));
 lim_cfg = get_field_or(step_cfg, 'limiter', struct());
 holo_cfg = get_field_or(step_cfg, 'holo', struct());
+par_cfg = get_field_or(step_cfg, 'parallel', struct());
+
+n_cells_top = size(u0_pn, 2);
+par_cells = mm_parallel_context(par_cfg, n_cells_top, 'cells');
+par_if = mm_parallel_context(par_cfg, n_cells_top + 1, 'interfaces');
+use_par_cells = par_cells.use_parallel;
+use_par_interfaces = par_if.use_parallel;
 
 use_mcl_pn = logical(get_field_or(holo_cfg, 'use_mcl_pn', true));
 use_mcl_m1 = logical(get_field_or(holo_cfg, 'use_mcl_m1', true));
@@ -108,36 +115,59 @@ step_state.timing = combine_holo_stage_timing(s1, s2, sync_stage1, sync_final, t
         tStage = tic;
         [nMomPn, nCells] = size(u_pn_stage);
 
-        jac_state = struct();
-        jac_state.V = cell(1, nCells);
-        jac_state.Vinv = cell(1, nCells);
+        V_cells = cell(1, nCells);
+        Vinv_cells = cell(1, nCells);
         tJac = tic;
-        for ic = 1:nCells
-            if rec_cfg.use_characteristic
-                J = flux_jacobian_fd(u_pn_stage(:, ic), model_pn, quad_pn, opt_cfg);
-                [V, D] = eig(J);
-                if any(~isfinite(V(:))) || any(~isfinite(diag(D)))
-                    V = eye(nMomPn);
+        if use_par_cells
+            parfor ic = 1:nCells
+                if rec_cfg.use_characteristic
+                    J = flux_jacobian_fd(u_pn_stage(:, ic), model_pn, quad_pn, opt_cfg);
+                    [V, D] = eig(J);
+                    if any(~isfinite(V(:))) || any(~isfinite(diag(D)))
+                        V = eye(nMomPn);
+                    end
+                    V_cells{ic} = V;
+                    Vinv_cells{ic} = pinv(V);
+                else
+                    V_cells{ic} = eye(nMomPn);
+                    Vinv_cells{ic} = eye(nMomPn);
                 end
-                jac_state.V{ic} = V;
-                jac_state.Vinv{ic} = pinv(V);
-            else
-                jac_state.V{ic} = eye(nMomPn);
-                jac_state.Vinv{ic} = eye(nMomPn);
+            end
+        else
+            for ic = 1:nCells
+                if rec_cfg.use_characteristic
+                    J = flux_jacobian_fd(u_pn_stage(:, ic), model_pn, quad_pn, opt_cfg);
+                    [V, D] = eig(J);
+                    if any(~isfinite(V(:))) || any(~isfinite(diag(D)))
+                        V = eye(nMomPn);
+                    end
+                    V_cells{ic} = V;
+                    Vinv_cells{ic} = pinv(V);
+                else
+                    V_cells{ic} = eye(nMomPn);
+                    Vinv_cells{ic} = eye(nMomPn);
+                end
             end
         end
+        jac_state = struct();
+        jac_state.V = V_cells;
+        jac_state.Vinv = Vinv_cells;
         tJacobian = toc(tJac);
 
         tRec = tic;
-        [uL_rec, uR_rec, rec_state] = mm_reconstruct_characteristic(u_pn_stage, jac_state, grid, rec_cfg);
+        rec_cfg_apply = rec_cfg;
+        rec_cfg_apply.parallel = par_cfg;
+        [uL_rec, uR_rec, rec_state] = mm_reconstruct_characteristic(u_pn_stage, jac_state, grid, rec_cfg_apply);
         tReconstruct = toc(tRec);
 
         tPn = tic;
         if use_mcl_pn
-            [g_pn, pn_lim_state] = mcl_interface_flux(u_pn_stage, uL_rec, uR_rec, model_pn, phys, t_stage, quad_pn, opt_cfg, lim_cfg);
+            [g_pn, pn_lim_state] = mcl_interface_flux(u_pn_stage, uL_rec, uR_rec, model_pn, phys, t_stage, quad_pn, opt_cfg, lim_cfg, use_par_interfaces);
         else
-            [uL_lim, uR_lim, pn_lim_state] = mm_apply_realizability_limiter(u_pn_stage, uL_rec, uR_rec, model_pn, lim_cfg, quad_pn);
-            g_pn = interface_flux_from_reconstructed(uL_lim, uR_lim, model_pn, phys, t_stage, quad_pn, opt_cfg);
+            lim_cfg_apply = lim_cfg;
+            lim_cfg_apply.parallel = par_cfg;
+            [uL_lim, uR_lim, pn_lim_state] = mm_apply_realizability_limiter(u_pn_stage, uL_rec, uR_rec, model_pn, lim_cfg_apply, quad_pn);
+            g_pn = interface_flux_from_reconstructed(uL_lim, uR_lim, model_pn, phys, t_stage, quad_pn, opt_cfg, use_par_interfaces);
             if ~isfield(pn_lim_state, 'mode')
                 pn_lim_state.mode = 'paper';
             end
@@ -150,7 +180,7 @@ step_state.timing = combine_holo_stage_timing(s1, s2, sync_stage1, sync_final, t
 
         g_ho_m1 = g_pn(1:2, :);
         tM1 = tic;
-        [g_m1, m1_lim_state] = m1_holo_mcl_flux(u_m1_stage, g_ho_m1, model_m1, phys, t_stage, quad_m1_flux, quad_m1_lp, opt_cfg, lim_cfg, use_mcl_m1);
+        [g_m1, m1_lim_state] = m1_holo_mcl_flux(u_m1_stage, g_ho_m1, model_m1, phys, t_stage, quad_m1_flux, quad_m1_lp, opt_cfg, lim_cfg, use_mcl_m1, use_par_interfaces);
         tM1Flux = toc(tM1);
         tRhsM1 = tic;
         rhs_m1 = -(g_m1(:, 2:end) - g_m1(:, 1:end-1)) / grid.dz;
@@ -174,7 +204,7 @@ step_state.timing = combine_holo_stage_timing(s1, s2, sync_stage1, sync_final, t
 
 end
 
-function [g, lim_state] = m1_holo_mcl_flux(u_stage, g_ho, model_m1, phys, t_stage, quad_flux, quad_lp, opt_cfg, lim_cfg, use_mcl)
+function [g, lim_state] = m1_holo_mcl_flux(u_stage, g_ho, model_m1, phys, t_stage, quad_flux, quad_lp, opt_cfg, lim_cfg, use_mcl, use_par_interfaces)
 [~, nCells] = size(u_stage);
 
 lambdaMCL = get_field_or(lim_cfg, 'mcl_lambda', 1.0);
@@ -190,59 +220,22 @@ bar_ok = true(1, nCells + 1);
 uBLeft = model_m1.b_iso * boundary_density('left', t_stage, phys);
 uBRight = model_m1.b_iso * boundary_density('right', t_stage, phys);
 
-for iif = 1:(nCells + 1)
-    if iif == 1
-        UL = uBLeft;
-        UR = u_stage(:, 1);
-    elseif iif == nCells + 1
-        UL = u_stage(:, nCells);
-        UR = uBRight;
-    else
-        UL = u_stage(:, iif - 1);
-        UR = u_stage(:, iif);
+if use_par_interfaces
+    parfor iif = 1:(nCells + 1)
+        [g_lo_i, g_i, theta_i, bar_ok_i] = m1_interface_state(iif, u_stage, g_ho, uBLeft, uBRight, model_m1, quad_flux, quad_lp, opt_cfg, lambdaMCL, epsR, maxBisect, use_mcl);
+        g_lo(:, iif) = g_lo_i;
+        g(:, iif) = g_i;
+        theta(iif) = theta_i;
+        bar_ok(iif) = bar_ok_i;
     end
-
-    [fL, ~] = mm_eval_flux_function(UL, model_m1, quad_flux, opt_cfg, struct());
-    [fR, ~] = mm_eval_flux_function(UR, model_m1, quad_flux, opt_cfg, struct());
-
-    g_lo(:, iif) = 0.5 * (fL + fR) - 0.5 * lambdaMCL * (UR - UL);
-
-    if ~use_mcl
-        g(:, iif) = g_ho(:, iif);
-        theta(iif) = 1.0;
-        continue;
+else
+    for iif = 1:(nCells + 1)
+        [g_lo_i, g_i, theta_i, bar_ok_i] = m1_interface_state(iif, u_stage, g_ho, uBLeft, uBRight, model_m1, quad_flux, quad_lp, opt_cfg, lambdaMCL, epsR, maxBisect, use_mcl);
+        g_lo(:, iif) = g_lo_i;
+        g(:, iif) = g_i;
+        theta(iif) = theta_i;
+        bar_ok(iif) = bar_ok_i;
     end
-
-    Ubar = 0.5 * (UL + UR) - (fR - fL) / (2 * lambdaMCL);
-    A = g_ho(:, iif) - g_lo(:, iif);
-
-    [okBar, ~] = mm_is_realizable(Ubar, model_m1, quad_lp, struct('epsR', epsR));
-    if ~okBar
-        theta(iif) = 0.0;
-        bar_ok(iif) = false;
-        g(:, iif) = g_lo(:, iif);
-        continue;
-    end
-
-    lo = 0.0;
-    hi = 1.0;
-    for it = 1:maxBisect
-        mid = 0.5 * (lo + hi);
-        Up = Ubar + (mid / lambdaMCL) * A;
-        Um = Ubar - (mid / lambdaMCL) * A;
-
-        [okP, ~] = mm_is_realizable(Up, model_m1, quad_lp, struct('epsR', epsR));
-        [okM, ~] = mm_is_realizable(Um, model_m1, quad_lp, struct('epsR', epsR));
-
-        if okP && okM
-            lo = mid;
-        else
-            hi = mid;
-        end
-    end
-
-    theta(iif) = lo;
-    g(:, iif) = g_lo(:, iif) + theta(iif) * A;
 end
 
 lim_state = struct();
@@ -254,9 +247,67 @@ lim_state.g_high = g_ho;
 
 end
 
-function [g, lim_state] = mcl_interface_flux(u_stage, uL_rec, uR_rec, model, phys, t_stage, quad_flux, opt_cfg, lim_cfg)
+function [g_lo_i, g_i, theta_i, bar_ok_i] = m1_interface_state(iif, u_stage, g_ho, uBLeft, uBRight, model_m1, quad_flux, quad_lp, opt_cfg, lambdaMCL, epsR, maxBisect, use_mcl)
+[~, nCells] = size(u_stage);
+
+if iif == 1
+    UL = uBLeft;
+    UR = u_stage(:, 1);
+elseif iif == nCells + 1
+    UL = u_stage(:, nCells);
+    UR = uBRight;
+else
+    UL = u_stage(:, iif - 1);
+    UR = u_stage(:, iif);
+end
+
+[fL, ~] = mm_eval_flux_function(UL, model_m1, quad_flux, opt_cfg, struct());
+[fR, ~] = mm_eval_flux_function(UR, model_m1, quad_flux, opt_cfg, struct());
+g_lo_i = 0.5 * (fL + fR) - 0.5 * lambdaMCL * (UR - UL);
+
+if ~use_mcl
+    g_i = g_ho(:, iif);
+    theta_i = 1.0;
+    bar_ok_i = true;
+    return;
+end
+
+Ubar = 0.5 * (UL + UR) - (fR - fL) / (2 * lambdaMCL);
+A = g_ho(:, iif) - g_lo_i;
+
+[okBar, ~] = mm_is_realizable(Ubar, model_m1, quad_lp, struct('epsR', epsR));
+if ~okBar
+    theta_i = 0.0;
+    bar_ok_i = false;
+    g_i = g_lo_i;
+    return;
+end
+
+lo = 0.0;
+hi = 1.0;
+for it = 1:maxBisect
+    mid = 0.5 * (lo + hi);
+    Up = Ubar + (mid / lambdaMCL) * A;
+    Um = Ubar - (mid / lambdaMCL) * A;
+
+    [okP, ~] = mm_is_realizable(Up, model_m1, quad_lp, struct('epsR', epsR));
+    [okM, ~] = mm_is_realizable(Um, model_m1, quad_lp, struct('epsR', epsR));
+
+    if okP && okM
+        lo = mid;
+    else
+        hi = mid;
+    end
+end
+
+theta_i = lo;
+bar_ok_i = true;
+g_i = g_lo_i + theta_i * A;
+end
+
+function [g, lim_state] = mcl_interface_flux(u_stage, uL_rec, uR_rec, model, phys, t_stage, quad_flux, opt_cfg, lim_cfg, use_par_interfaces)
 [nMom, nCells] = size(u_stage);
-g_ho = interface_flux_from_reconstructed(uL_rec, uR_rec, model, phys, t_stage, quad_flux, opt_cfg);
+g_ho = interface_flux_from_reconstructed(uL_rec, uR_rec, model, phys, t_stage, quad_flux, opt_cfg, use_par_interfaces);
 
 g_lo = zeros(nMom, nCells + 1);
 g = zeros(nMom, nCells + 1);
@@ -271,52 +322,22 @@ epsR = get_field_or(lim_cfg, 'epsR', 0.0);
 uBLeft = model.b_iso * boundary_density('left', t_stage, phys);
 uBRight = model.b_iso * boundary_density('right', t_stage, phys);
 
-for iif = 1:(nCells + 1)
-    if iif == 1
-        UL = uBLeft;
-        UR = u_stage(:, 1);
-    elseif iif == nCells + 1
-        UL = u_stage(:, nCells);
-        UR = uBRight;
-    else
-        UL = u_stage(:, iif - 1);
-        UR = u_stage(:, iif);
+if use_par_interfaces
+    parfor iif = 1:(nCells + 1)
+        [g_lo_i, g_i, theta_i, bar_ok_i] = mcl_interface_state(iif, u_stage, g_ho, uBLeft, uBRight, model, quad_flux, opt_cfg, lambdaMCL, epsR, maxBisect);
+        g_lo(:, iif) = g_lo_i;
+        g(:, iif) = g_i;
+        theta(iif) = theta_i;
+        bar_ok(iif) = bar_ok_i;
     end
-
-    [fL, ~] = mm_eval_flux_function(UL, model, quad_flux, opt_cfg, struct());
-    [fR, ~] = mm_eval_flux_function(UR, model, quad_flux, opt_cfg, struct());
-
-    g_lo(:, iif) = 0.5 * (fL + fR) - 0.5 * lambdaMCL * (UR - UL);
-    Ubar = 0.5 * (UL + UR) - (fR - fL) / (2 * lambdaMCL);
-    A = g_ho(:, iif) - g_lo(:, iif);
-
-    [okBar, ~] = mm_is_realizable(Ubar, model, quad_flux, struct('epsR', epsR));
-    if ~okBar
-        theta(iif) = 0.0;
-        bar_ok(iif) = false;
-        g(:, iif) = g_lo(:, iif);
-        continue;
+else
+    for iif = 1:(nCells + 1)
+        [g_lo_i, g_i, theta_i, bar_ok_i] = mcl_interface_state(iif, u_stage, g_ho, uBLeft, uBRight, model, quad_flux, opt_cfg, lambdaMCL, epsR, maxBisect);
+        g_lo(:, iif) = g_lo_i;
+        g(:, iif) = g_i;
+        theta(iif) = theta_i;
+        bar_ok(iif) = bar_ok_i;
     end
-
-    lo = 0.0;
-    hi = 1.0;
-    for it = 1:maxBisect
-        mid = 0.5 * (lo + hi);
-        Up = Ubar + (mid / lambdaMCL) * A;
-        Um = Ubar - (mid / lambdaMCL) * A;
-
-        [okP, ~] = mm_is_realizable(Up, model, quad_flux, struct('epsR', epsR));
-        [okM, ~] = mm_is_realizable(Um, model, quad_flux, struct('epsR', epsR));
-
-        if okP && okM
-            lo = mid;
-        else
-            hi = mid;
-        end
-    end
-
-    theta(iif) = lo;
-    g(:, iif) = g_lo(:, iif) + theta(iif) * A;
 end
 
 lim_state = struct();
@@ -328,7 +349,58 @@ lim_state.g_high = g_ho;
 
 end
 
-function g = interface_flux_from_reconstructed(uL, uR, model, phys, t_stage, quad_flux, opt_cfg)
+function [g_lo_i, g_i, theta_i, bar_ok_i] = mcl_interface_state(iif, u_stage, g_ho, uBLeft, uBRight, model, quad_flux, opt_cfg, lambdaMCL, epsR, maxBisect)
+[~, nCells] = size(u_stage);
+
+if iif == 1
+    UL = uBLeft;
+    UR = u_stage(:, 1);
+elseif iif == nCells + 1
+    UL = u_stage(:, nCells);
+    UR = uBRight;
+else
+    UL = u_stage(:, iif - 1);
+    UR = u_stage(:, iif);
+end
+
+[fL, ~] = mm_eval_flux_function(UL, model, quad_flux, opt_cfg, struct());
+[fR, ~] = mm_eval_flux_function(UR, model, quad_flux, opt_cfg, struct());
+
+g_lo_i = 0.5 * (fL + fR) - 0.5 * lambdaMCL * (UR - UL);
+Ubar = 0.5 * (UL + UR) - (fR - fL) / (2 * lambdaMCL);
+A = g_ho(:, iif) - g_lo_i;
+
+[okBar, ~] = mm_is_realizable(Ubar, model, quad_flux, struct('epsR', epsR));
+if ~okBar
+    theta_i = 0.0;
+    bar_ok_i = false;
+    g_i = g_lo_i;
+    return;
+end
+
+lo = 0.0;
+hi = 1.0;
+for it = 1:maxBisect
+    mid = 0.5 * (lo + hi);
+    Up = Ubar + (mid / lambdaMCL) * A;
+    Um = Ubar - (mid / lambdaMCL) * A;
+
+    [okP, ~] = mm_is_realizable(Up, model, quad_flux, struct('epsR', epsR));
+    [okM, ~] = mm_is_realizable(Um, model, quad_flux, struct('epsR', epsR));
+
+    if okP && okM
+        lo = mid;
+    else
+        hi = mid;
+    end
+end
+
+theta_i = lo;
+bar_ok_i = true;
+g_i = g_lo_i + theta_i * A;
+end
+
+function g = interface_flux_from_reconstructed(uL, uR, model, phys, t_stage, quad_flux, opt_cfg, use_par_interfaces)
 [nMom, nCells] = size(uL);
 g = zeros(nMom, nCells + 1);
 
@@ -336,8 +408,16 @@ uBLeft = model.b_iso * boundary_density('left', t_stage, phys);
 uBRight = model.b_iso * boundary_density('right', t_stage, phys);
 
 [g(:, 1), ~] = mm_kinetic_flux(uBLeft, uL(:, 1), model, quad_flux, struct('opt_cfg', opt_cfg));
-for iif = 1:(nCells - 1)
-    [g(:, iif + 1), ~] = mm_kinetic_flux(uR(:, iif), uL(:, iif + 1), model, quad_flux, struct('opt_cfg', opt_cfg));
+if use_par_interfaces && nCells > 1
+    g_int = zeros(nMom, nCells - 1);
+    parfor iif = 1:(nCells - 1)
+        [g_int(:, iif), ~] = mm_kinetic_flux(uR(:, iif), uL(:, iif + 1), model, quad_flux, struct('opt_cfg', opt_cfg));
+    end
+    g(:, 2:nCells) = g_int;
+else
+    for iif = 1:(nCells - 1)
+        [g(:, iif + 1), ~] = mm_kinetic_flux(uR(:, iif), uL(:, iif + 1), model, quad_flux, struct('opt_cfg', opt_cfg));
+    end
 end
 [g(:, nCells + 1), ~] = mm_kinetic_flux(uR(:, nCells), uBRight, model, quad_flux, struct('opt_cfg', opt_cfg));
 

@@ -18,6 +18,9 @@ epsTheta = get_field_or(lim_cfg, 'eps_theta', 0.0);
 maxBisect = get_field_or(lim_cfg, 'lp_bisect_iter', 32);
 % NEW (optional): characteristic-component LP limiter for full-moment models.
 useCharLP = logical(get_field_or(lim_cfg, 'paper_lp_characteristic', false));
+par_cfg = get_field_or(lim_cfg, 'parallel', struct());
+par_ctx = mm_parallel_context(par_cfg, nCells, 'cells');
+use_par_cells = par_ctx.use_parallel;
 
 uL_lim = uL;
 uR_lim = uR;
@@ -27,54 +30,28 @@ usedCharLP = false(1, nCells);
 fallbackCharLP = false(1, nCells);
 charBasis = get_field_or(lim_cfg, 'characteristic_basis', struct());
 
-for i = 1:nCells
-    ubar = uCell(:, i);
-
-    [okBar, ~] = mm_is_realizable(ubar, model, quad, struct('epsR', epsR));
-    if ~okBar
-        theta = 1.0;
-        thetaVec = ones(nMom, 1);
-    else
-        usedVectorLimiter = false;
-        if useCharLP && strcmp(model.realizability, 'lp')
-            [thetaVec, okVec] = theta_lp_characteristic_pair(ubar, uL(:, i), uR(:, i), model, quad, charBasis, i);
-            if okVec
-                thetaVec = min(1.0, max(0.0, thetaVec + epsTheta));
-                [uL_try, uR_try] = apply_characteristic_theta(ubar, uL(:, i), uR(:, i), thetaVec, charBasis, i);
-
-                [okL, ~] = mm_is_realizable(uL_try, model, quad, struct('epsR', epsR));
-                [okR, ~] = mm_is_realizable(uR_try, model, quad, struct('epsR', epsR));
-                if okL && okR
-                    uL_lim(:, i) = uL_try;
-                    uR_lim(:, i) = uR_try;
-                    theta = max(thetaVec);
-                    usedVectorLimiter = true;
-                    usedCharLP(i) = true;
-                else
-                    fallbackCharLP(i) = true;
-                end
-            else
-                fallbackCharLP(i) = true;
-            end
-        end
-
-        if ~usedVectorLimiter
-            tL = theta_for_state(ubar, uL(:, i), model, epsR, quad, maxBisect);
-            tR = theta_for_state(ubar, uR(:, i), model, epsR, quad, maxBisect);
-            theta = max(tL, tR);
-            thetaVec = theta * ones(nMom, 1);
-        end
+if use_par_cells
+    parfor i = 1:nCells
+        [uL_i, uR_i, theta_i, thetaVec_i, usedChar_i, fallback_i] = ...
+            limit_single_cell(i, uCell, uL, uR, model, quad, epsR, epsTheta, maxBisect, useCharLP, charBasis);
+        uL_lim(:, i) = uL_i;
+        uR_lim(:, i) = uR_i;
+        thetaCell(i) = theta_i;
+        thetaComp(:, i) = thetaVec_i;
+        usedCharLP(i) = usedChar_i;
+        fallbackCharLP(i) = fallback_i;
     end
-
-    if ~usedCharLP(i)
-        theta = min(1.0, max(0.0, theta + epsTheta));
-
-        uL_lim(:, i) = theta * ubar + (1 - theta) * uL(:, i);
-        uR_lim(:, i) = theta * ubar + (1 - theta) * uR(:, i);
+else
+    for i = 1:nCells
+        [uL_i, uR_i, theta_i, thetaVec_i, usedChar_i, fallback_i] = ...
+            limit_single_cell(i, uCell, uL, uR, model, quad, epsR, epsTheta, maxBisect, useCharLP, charBasis);
+        uL_lim(:, i) = uL_i;
+        uR_lim(:, i) = uR_i;
+        thetaCell(i) = theta_i;
+        thetaComp(:, i) = thetaVec_i;
+        usedCharLP(i) = usedChar_i;
+        fallbackCharLP(i) = fallback_i;
     end
-
-    thetaCell(i) = theta;
-    thetaComp(:, i) = thetaVec;
 end
 
 lim_state = struct('theta', thetaCell);
@@ -87,6 +64,61 @@ end
 lim_state.char_lp_used_cells = usedCharLP;
 lim_state.char_lp_fallback_cells = fallbackCharLP;
 
+end
+
+function [uL_out, uR_out, theta, thetaVec, usedChar, fallbackChar] = limit_single_cell(i, uCell, uL, uR, model, quad, epsR, epsTheta, maxBisect, useCharLP, charBasis)
+nMom = size(uCell, 1);
+ubar = uCell(:, i);
+uL_i = uL(:, i);
+uR_i = uR(:, i);
+
+usedChar = false;
+fallbackChar = false;
+theta = 1.0;
+thetaVec = ones(nMom, 1);
+
+[okBar, ~] = mm_is_realizable(ubar, model, quad, struct('epsR', epsR));
+if okBar
+    usedVectorLimiter = false;
+    if useCharLP && strcmp(model.realizability, 'lp')
+        [thetaVecTry, okVec] = theta_lp_characteristic_pair(ubar, uL_i, uR_i, model, quad, charBasis, i);
+        if okVec
+            thetaVecTry = min(1.0, max(0.0, thetaVecTry + epsTheta));
+            [uL_try, uR_try] = apply_characteristic_theta(ubar, uL_i, uR_i, thetaVecTry, charBasis, i);
+
+            [okL, ~] = mm_is_realizable(uL_try, model, quad, struct('epsR', epsR));
+            [okR, ~] = mm_is_realizable(uR_try, model, quad, struct('epsR', epsR));
+            if okL && okR
+                uL_i = uL_try;
+                uR_i = uR_try;
+                thetaVec = thetaVecTry;
+                theta = max(thetaVec);
+                usedVectorLimiter = true;
+                usedChar = true;
+            else
+                fallbackChar = true;
+            end
+        else
+            fallbackChar = true;
+        end
+    end
+
+    if ~usedVectorLimiter
+        tL = theta_for_state(ubar, uL_i, model, epsR, quad, maxBisect);
+        tR = theta_for_state(ubar, uR_i, model, epsR, quad, maxBisect);
+        theta = max(tL, tR);
+        thetaVec = theta * ones(nMom, 1);
+    end
+end
+
+if ~usedChar
+    theta = min(1.0, max(0.0, theta + epsTheta));
+    uL_i = theta * ubar + (1 - theta) * uL_i;
+    uR_i = theta * ubar + (1 - theta) * uR_i;
+end
+
+uL_out = uL_i;
+uR_out = uR_i;
 end
 
 function theta = theta_for_state(ubar, urec, model, epsR, quad, maxBisect)

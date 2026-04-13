@@ -10,7 +10,9 @@ tStrang = tic;
 opt_cfg = get_field_or(solver_cfg, 'optimizer', struct('eps_gamma', 1.0e-2));
 eps_gamma = get_field_or(opt_cfg, 'eps_gamma', 1.0e-2);
 
+% Eq. 4.33
 dt_max = ((1 - eps_gamma) / 2.0) * grid.dz;
+
 if dt > dt_max
     if get_field_or(solver_cfg, 'auto_clip_dt', true)
         dt = 0.99 * dt_max;

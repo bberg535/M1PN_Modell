@@ -1,2 +1,0 @@
-model,order,nMom,L1,Linf,symmetry_L1_rel,min_rho,runtime_s,n_steps,theta_pn_active_total,theta_m1_active_total,sync_corr_stage1_mean,sync_corr_final_mean
-HOLOM1PN,3,4,1.46737513316791,3.41818515322716,1.28638938234436e-12,1e-08,15.5125524,1,0,0,4.54747350886464e-13,4.28632664094384e-13

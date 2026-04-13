@@ -163,7 +163,11 @@ switch model.family
         k = model.kIntervals;
         for j = 1:k
             a = e(j); b = e(j + 1);
-            idx = mu >= a & mu <= b;
+            if j < k
+                idx = mu >= a & mu < b;
+            else
+                idx = mu >= a & mu <= b;
+            end
             col = 2*j - 1;
             B(idx, col) = 1.0;
             B(idx, col + 1) = mu(idx);

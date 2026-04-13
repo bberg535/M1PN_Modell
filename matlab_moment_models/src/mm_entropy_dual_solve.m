@@ -153,6 +153,7 @@ info.cached_alpha = alpha;
 end
 
 function d = compute_newton_direction(H, g, use_change_of_basis)
+
 reg = 1.0e-12;
 n = size(H, 1);
 
@@ -172,11 +173,27 @@ end
 end
 
 function x = solve_linear(A, b)
-try
-    x = A \ b;
-catch
+n = size(A, 1);
+if size(A, 2) ~= n
     x = pinv(A) * b;
+    return;
 end
+
+rA = rcond(A);
+if ~isfinite(rA) || rA < 1.0e-12
+    % Avoid warning storms from near-singular solves in long PMMn runs.
+    regA = max(1.0e-12, 1.0e-10 * norm(A, 1));
+    Areg = A + regA * eye(n);
+    rReg = rcond(Areg);
+    if isfinite(rReg) && rReg >= 1.0e-12
+        x = Areg \ b;
+    else
+        x = pinv(A) * b;
+    end
+else
+    x = A \ b;
+end
+
 if any(~isfinite(x))
     x = pinv(A) * b;
 end
@@ -211,6 +228,10 @@ if isfield(opt_cfg, 'use_change_of_basis')
     opt.use_change_of_basis = logical(opt_cfg.use_change_of_basis);
 else
     opt.use_change_of_basis = model.use_change_of_basis_default;
+end
+
+if model.is_partial && model.needs_entropy && isfield(opt_cfg, 'use_change_of_basis_partial_entropy')
+    opt.use_change_of_basis = logical(opt_cfg.use_change_of_basis_partial_entropy);
 end
 end
 

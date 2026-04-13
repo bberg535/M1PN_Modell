@@ -1,3 +1,0 @@
-model,order,nMom,L1,Linf,symmetry_L1_rel,min_rho,runtime_s,n_steps,time_reference_s,time_model_build_s,time_quad_build_s,time_solver_total_s,time_step_sum_s,time_source_sum_s,time_flux_sum_s,time_flux_jacobian_sum_s,time_flux_reconstruct_sum_s,time_flux_limiter_flux_sum_s
-PN,3,4,1.73350982956965,3.48118822577316,1.43759877275941e-12,1e-08,7.1147793,1,0.0138252,0.0002287,0.0013712,7.1147793,7.1100962,0.011033,7.0905625,0.0296112,0.0191487,7.0380582
-MN,1,2,1.73350982956965,3.48356318547031,0.00138534831309049,1e-08,8.2249063,1,0.0138252,0.0002784,0.0021015,8.2249063,8.2233946,0.0011608,8.2204408,1.3711863,0.0072405,6.8398733

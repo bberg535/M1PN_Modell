@@ -11,28 +11,54 @@ if isfield(rec_cfg, 'use_characteristic')
 else
     useChar = true;
 end
+par_cfg = get_field_or(rec_cfg, 'parallel', struct());
+par_ctx = mm_parallel_context(par_cfg, nCells, 'cells');
+use_par_cells = par_ctx.use_parallel && nCells > 2;
 
 slopes = zeros(nMom, nCells);
 
-for i = 2:(nCells - 1)
-    duF = u(:, i + 1) - u(:, i);
-    duB = u(:, i) - u(:, i - 1);
-    duC = 0.5 * (u(:, i + 1) - u(:, i - 1));
+if use_par_cells
+    parfor i = 2:(nCells - 1)
+        duF = u(:, i + 1) - u(:, i);
+        duB = u(:, i) - u(:, i - 1);
+        duC = 0.5 * (u(:, i + 1) - u(:, i - 1));
 
-    if useChar && ~isempty(jac_state) && isfield(jac_state, 'V') && numel(jac_state.V) >= i
-        V = jac_state.V{i};
-        Vinv = jac_state.Vinv{i};
-    else
-        V = eye(nMom);
-        Vinv = eye(nMom);
+        if useChar && ~isempty(jac_state) && isfield(jac_state, 'V') && numel(jac_state.V) >= i
+            V = jac_state.V{i};
+            Vinv = jac_state.Vinv{i};
+        else
+            V = eye(nMom);
+            Vinv = eye(nMom);
+        end
+
+        cF = Vinv * duF;
+        cB = Vinv * duB;
+        cC = Vinv * duC;
+
+        cSlope = mm_minmod(cF, cB, cC) / dz;
+        slopes(:, i) = V * cSlope;
     end
+else
+    for i = 2:(nCells - 1)
+        duF = u(:, i + 1) - u(:, i);
+        duB = u(:, i) - u(:, i - 1);
+        duC = 0.5 * (u(:, i + 1) - u(:, i - 1));
 
-    cF = Vinv * duF;
-    cB = Vinv * duB;
-    cC = Vinv * duC;
+        if useChar && ~isempty(jac_state) && isfield(jac_state, 'V') && numel(jac_state.V) >= i
+            V = jac_state.V{i};
+            Vinv = jac_state.Vinv{i};
+        else
+            V = eye(nMom);
+            Vinv = eye(nMom);
+        end
 
-    cSlope = mm_minmod(cF, cB, cC) / dz;
-    slopes(:, i) = V * cSlope;
+        cF = Vinv * duF;
+        cB = Vinv * duB;
+        cC = Vinv * duC;
+
+        cSlope = mm_minmod(cF, cB, cC) / dz;
+        slopes(:, i) = V * cSlope;
+    end
 end
 
 uL = u - 0.5 * dz * slopes;
@@ -46,4 +72,12 @@ uR(:, nCells) = u(:, nCells);
 
 rec_state = struct('slopes', slopes, 'used_characteristic', useChar);
 
+end
+
+function v = get_field_or(s, name, default)
+if isfield(s, name)
+    v = s.(name);
+else
+    v = default;
+end
 end

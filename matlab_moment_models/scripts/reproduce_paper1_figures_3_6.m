@@ -3,10 +3,50 @@ addpath(fullfile(fileparts(fileparts(mfilename('fullpath'))), 'src'));
 
 cfg = mm_default_config();
 
-% Focus profile for Seminarquelle 1 slab tests (Figure 3-6 reconstruction).
-cfg.paper1.eval_mu = linspace(-1, 1, 2001);
+% Output / run control.
 cfg.io.close_figures = false;
+cfg.io.write_pdf = true;
+
+% Quadrature / evaluation grid.
+cfg.quad.lobatto_order = 15;
+cfg.quad.base_legendre_order = 80;
+cfg.quad.eval_points = 2001;
+cfg.paper1.eval_mu = linspace(-1, 1, cfg.quad.eval_points);
+
+% Optimizer used by entropy models (MN, HFMn, PMMn).
+cfg.optimizer.tau = 1.0e-9;
+cfg.optimizer.eps_gamma = 1.0e-2;
+cfg.optimizer.max_iter = 2000;
+cfg.optimizer.armijo_c = 1.0e-13;
+cfg.optimizer.armijo_backtrack = 0.5;
+cfg.optimizer.step_min = 1.0e-12;
+cfg.optimizer.grad_tol = 1.0e-14;
+cfg.optimizer.regularization_r = [0, 1.0e-8, 1.0e-6, 1.0e-4, 1.0e-3, 1.0e-2, 5.0e-2, 0.1, 0.5, 1.0];
+cfg.optimizer.rho_vac = 1.0e-8;
+cfg.optimizer.use_change_of_basis = true;
+cfg.optimizer.use_change_of_basis_partial_entropy = false;
+cfg.optimizer.change_of_basis_cond = 1.0e10;
+
+% Paper-1 benchmark parameters.
+cfg.physics.psi_vac_density = 1.0e-8 / 2.0;
+cfg.paper1.gauss_sigma = 0.5;
+cfg.paper1.gauss_mu_bar = 0.0;
+cfg.paper1.heaviside_jump = 0.0;
+cfg.paper1.crossing_a = 1.0e3;
 cfg.paper1.figure3_use_cfg_registry = false;
+cfg.paper1.figure3_use_warmstart = true; % true => reuse previous entropy multipliers across Figure-3 orders
+cfg.paper1.figure3_orders.PN = [1:2:101];
+cfg.paper1.figure3_orders.MN = [1:2:101];
+cfg.paper1.figure3_orders.HFPn = 2:2:100;
+cfg.paper1.figure3_orders.HFMn = 2:2:100;
+cfg.paper1.figure3_orders.PMPn = 2:2:100;
+cfg.paper1.figure3_orders.PMMn = 2:2:100;
+cfg.paper1.heaviside_reg_floor = 1.0e-2;
+cfg.paper1.heaviside_reg_retry_floor = 5.0e-2;
+cfg.paper1.crossing_reg_floor = 0.0;
+cfg.paper1.crossing_reg_retry_floor = 0.0;
+cfg.paper1.nonsmooth_retry_spike_factor = 50.0;
+cfg.paper1.plot_endpoint_trim = 1.0e-3;
 
 res = run_paper1_figures_3_6(cfg);
-disp(res.csv);
+disp(res.figure3_base);

@@ -39,6 +39,7 @@ cases(3).ref_plot = psiCross(muPlot);
 
 registryFig3 = build_figure3_registry(cfg, paper1Cfg);
 rows = [];
+warmstartCache = struct();
 
 for i = 1:numel(registryFig3)
     rec = registryFig3(i);
@@ -47,18 +48,21 @@ for i = 1:numel(registryFig3)
 
     for ic = 1:numel(cases)
         c = cases(ic);
-        [row, psiHatEval] = eval_case(c.name, c.psi, c.ref_eval, muEval, model, quad, cfg.optimizer, rec, paper1Cfg);
-        rows = [rows; row]; %#ok<AGROW>
+        cacheKey = get_warmstart_key(c.name, rec.name);
+        cacheIn = struct();
+        if paper1Cfg.figure3_use_warmstart && model.needs_entropy && isfield(warmstartCache, cacheKey)
+            cacheIn.alpha0 = fit_warmstart_alpha(warmstartCache.(cacheKey), model.nMom);
+        end
 
-        outProf = fullfile(cfg.paths.results, sprintf('paper1_%s_%s_%d_profile.csv', c.name, rec.name, rec.order));
-        Tprof = table(muEval, c.ref_eval(:), psiHatEval(:), 'VariableNames', {'mu', 'psi_ref', 'psi_hat'});
-        writetable(Tprof, outProf);
+        [row, ~, cacheOut] = eval_case(c.name, c.psi, c.ref_eval, muEval, model, quad, cfg.optimizer, rec, paper1Cfg, cacheIn);
+        rows = [rows; row]; %#ok<AGROW>
+        if paper1Cfg.figure3_use_warmstart && model.needs_entropy && ~isempty(cacheOut)
+            warmstartCache.(cacheKey) = cacheOut;
+        end
     end
 end
 
 T = struct2table(rows);
-outCsv = fullfile(cfg.paths.results, 'paper1_fig3_convergence_errors.csv');
-writetable(T, outCsv);
 
 fig3Base = fullfile(cfg.paths.results, 'paper1_figure3_convergence');
 plot_figure3_convergence(T, fig3Base, closeFigures);
@@ -74,7 +78,6 @@ plot_selected_families(muPlot, cases(3), cfg, get_figure6_selection(), fig6Base,
 
 res = struct();
 res.table = T;
-res.csv = outCsv;
 res.figure3_base = fig3Base;
 res.figure4_base = fig4Base;
 res.figure5_base = fig5Base;
@@ -82,9 +85,13 @@ res.figure6_base = fig6Base;
 
 end
 
-function [row, psiHat] = eval_case(caseName, psiFun, ref, muEval, model, quad, optCfg, rec, paper1Cfg)
+function [row, psiHat, cacheOut] = eval_case(caseName, psiFun, ref, muEval, model, quad, optCfg, rec, paper1Cfg, cacheIn)
+if nargin < 10 || isempty(cacheIn)
+    cacheIn = struct();
+end
+
 tStart = tic;
-[psiHat, info] = reconstruct_density(caseName, psiFun, ref, muEval, model, quad, optCfg, paper1Cfg);
+[psiHat, info, cacheOut] = reconstruct_density(caseName, psiFun, ref, muEval, model, quad, optCfg, paper1Cfg, cacheIn);
 
 err = abs(psiHat - ref(:));
 L1 = trapz(muEval, err);
@@ -102,19 +109,29 @@ row.iterations = info.iterations;
 row.converged = info.converged;
 end
 
-function [psiHat, info] = reconstruct_density(caseName, psiFun, ref, muGrid, model, quad, optCfg, paper1Cfg)
+function [psiHat, info, cacheOut] = reconstruct_density(caseName, psiFun, ref, muGrid, model, quad, optCfg, paper1Cfg, cacheState)
+if nargin < 9 || isempty(cacheState)
+    cacheState = struct();
+end
+
+cacheOut = [];
 u = mm_project_density_to_moments(psiFun, model, quad);
 B = model.basis_eval(muGrid);
 
 if model.needs_entropy
     optUse = adapt_opt_cfg(optCfg, model, caseName, paper1Cfg);
-    [alpha, info] = mm_entropy_dual_solve(u, model, quad, optUse, struct());
+    [alpha, info] = mm_entropy_dual_solve(u, model, quad, optUse, cacheState);
     psiHat = exp(min(B * alpha, 700));
 
     if should_retry_entropy(caseName, model, psiHat, ref, paper1Cfg)
         optRetry = optUse;
-        optRetry.regularization_r = enforce_regularization_floor(optUse.regularization_r, paper1Cfg.nonsmooth_reg_retry_floor);
-        [alphaRetry, infoRetry] = mm_entropy_dual_solve(u, model, quad, optRetry, struct());
+        optRetry.regularization_r = enforce_regularization_floor(optUse.regularization_r, ...
+            get_case_retry_reg_floor(caseName, paper1Cfg));
+        retryCache = cacheState;
+        if isfield(info, 'cached_alpha') && numel(info.cached_alpha) == model.nMom
+            retryCache.last_alpha = info.cached_alpha(:);
+        end
+        [alphaRetry, infoRetry] = mm_entropy_dual_solve(u, model, quad, optRetry, retryCache);
         psiRetry = exp(min(B * alphaRetry, 700));
         if is_better_profile(psiHat, psiRetry, ref)
             psiHat = psiRetry;
@@ -124,6 +141,9 @@ if model.needs_entropy
 
     if any(~isfinite(psiHat))
         psiHat(:) = NaN;
+    end
+    if info.converged && isfield(info, 'cached_alpha') && numel(info.cached_alpha) == model.nMom
+        cacheOut = info.cached_alpha(:);
     end
 else
     alpha = model.mass_matrix \ u;
@@ -157,7 +177,7 @@ function optUse = adapt_opt_cfg(optCfg, model, caseName, paper1Cfg)
 optUse = optCfg;
 if model.needs_entropy && strcmp(model.name, 'MN') && is_nonsmooth_case(caseName)
     optUse.regularization_r = enforce_regularization_floor(get_field_or(optCfg, 'regularization_r', [0, 1e-6, 1e-4, 1e-2, 1]), ...
-        paper1Cfg.nonsmooth_reg_floor);
+        get_case_reg_floor(caseName, paper1Cfg));
 end
 end
 
@@ -208,11 +228,11 @@ end
 end
 
 function plot_case_error(T, caseName, errName)
-nexttile;
+ax = nexttile;
 mask = strcmp(string(T.case), caseName);
 Tc = T(mask, :);
 models = unique(string(Tc.model), 'stable');
-hold on;
+hold(ax, 'on');
 
 for i = 1:numel(models)
     m = models(i);
@@ -234,14 +254,15 @@ for i = 1:numel(models)
     y = y(good);
 
     if ~isempty(x)
-        loglog(x, y, '-o', 'DisplayName', char(m), 'LineWidth', 1.2, 'MarkerSize', 4);
+        plot(ax, x, y, '-o', 'DisplayName', char(m), 'LineWidth', 1.2, 'MarkerSize', 4);
     end
 end
-grid(gca, 'on');
-xlabel('nMom');
-ylabel(sprintf('%s error', errName));
-title(sprintf('%s: %s convergence', caseName, errName));
-legend('Location', 'best');
+set(ax, 'YScale', 'log');
+grid(ax, 'on');
+xlabel(ax, 'nMom');
+ylabel(ax, sprintf('%s error', errName));
+title(ax, sprintf('%s: %s convergence', caseName, errName));
+legend(ax, 'Location', 'best');
 end
 
 function plot_selected_families(muPlot, c, cfg, selection, outBase, closeFigures, paper1Cfg)
@@ -368,8 +389,23 @@ paper1Cfg = in;
 if ~isfield(paper1Cfg, 'figure3_use_cfg_registry')
     paper1Cfg.figure3_use_cfg_registry = false;
 end
+if ~isfield(paper1Cfg, 'figure3_use_warmstart')
+    paper1Cfg.figure3_use_warmstart = false;
+end
 if ~isfield(paper1Cfg, 'figure3_orders')
     paper1Cfg.figure3_orders = default_figure3_orders();
+end
+if ~isfield(paper1Cfg, 'heaviside_reg_floor')
+    paper1Cfg.heaviside_reg_floor = get_field_or(paper1Cfg, 'nonsmooth_reg_floor', 1.0e-2);
+end
+if ~isfield(paper1Cfg, 'heaviside_reg_retry_floor')
+    paper1Cfg.heaviside_reg_retry_floor = get_field_or(paper1Cfg, 'nonsmooth_reg_retry_floor', 5.0e-2);
+end
+if ~isfield(paper1Cfg, 'crossing_reg_floor')
+    paper1Cfg.crossing_reg_floor = 0.0;
+end
+if ~isfield(paper1Cfg, 'crossing_reg_retry_floor')
+    paper1Cfg.crossing_reg_retry_floor = 0.0;
 end
 if ~isfield(paper1Cfg, 'nonsmooth_reg_floor')
     paper1Cfg.nonsmooth_reg_floor = 1.0e-2;
@@ -407,5 +443,35 @@ function closeFigures = get_close_figures(cfg)
 closeFigures = true;
 if isfield(cfg, 'io') && isfield(cfg.io, 'close_figures')
     closeFigures = logical(cfg.io.close_figures);
+end
+end
+
+function key = get_warmstart_key(caseName, modelName)
+key = [caseName '__' modelName];
+end
+
+function alphaFit = fit_warmstart_alpha(alphaPrev, nMom)
+alphaFit = zeros(nMom, 1);
+nCopy = min(numel(alphaPrev), nMom);
+alphaFit(1:nCopy) = alphaPrev(1:nCopy);
+end
+
+function floorVal = get_case_reg_floor(caseName, paper1Cfg)
+if strcmp(caseName, 'Heaviside')
+    floorVal = paper1Cfg.heaviside_reg_floor;
+elseif strcmp(caseName, 'CrossingBeams')
+    floorVal = paper1Cfg.crossing_reg_floor;
+else
+    floorVal = 0.0;
+end
+end
+
+function floorVal = get_case_retry_reg_floor(caseName, paper1Cfg)
+if strcmp(caseName, 'Heaviside')
+    floorVal = paper1Cfg.heaviside_reg_retry_floor;
+elseif strcmp(caseName, 'CrossingBeams')
+    floorVal = paper1Cfg.crossing_reg_retry_floor;
+else
+    floorVal = 0.0;
 end
 end

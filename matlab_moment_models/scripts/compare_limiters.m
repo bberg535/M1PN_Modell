@@ -22,14 +22,15 @@ switch lower(profile)
     case 'quick'
         % Keep runtime practical for direct comparison.
         cfg.models.families = {'HFMn', 'PMMn'};
-        cfg.models.orders.HFMn = [4, 8];
-        cfg.models.orders.PMMn = [4];
+        %cfg.models.orders.HFMn = [4, 8];
+        cfg.models.orders.PN = [3, 7, 51];
+        %cfg.models.orders.PMMn = [4];
 
-        cfg.paper2.n_cells = 40;
+        cfg.paper2.n_cells = 1000;
         cfg.paper2.tf = 0.25;
 
-        cfg.reference.n_cells = 180;
-        cfg.reference.n_mu = 64;
+        cfg.reference.n_cells = 1000;
+        cfg.reference.n_mu = 128;
         cfg.reference.tf = cfg.paper2.tf;
         cfg.reference.domain = cfg.paper2.domain;
 

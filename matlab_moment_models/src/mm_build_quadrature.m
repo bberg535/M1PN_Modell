@@ -16,7 +16,7 @@ switch model.family
     case {'hat', 'partial'}
         % Gauss-Lobatto per interval (Section 5.4, suitable for HFM/PMM realizability).
         qOrder = get_field_or(cfg_quad, 'lobatto_order', 15);
-        [mu, w] = piecewise_lobatto(model.mu_edges, qOrder);
+        [mu, w, interval_id] = piecewise_lobatto(model.mu_edges, qOrder);
 
     case 'full'
         % For full moments (PN/MN), use high-order quadrature on both half intervals.
@@ -38,7 +38,12 @@ end
 
 quad.mu = mu(:);
 quad.w = w(:);
-quad.B = model.basis_eval(quad.mu);
+if model.is_partial
+    quad.B = build_partial_basis_with_interval_ids(model, quad.mu, interval_id(:));
+    quad.interval_index = interval_id(:);
+else
+    quad.B = model.basis_eval(quad.mu);
+end
 
 pos = quad.mu >= 0;
 neg = quad.mu <= 0;
@@ -48,10 +53,6 @@ quad.B_plus = quad.B(pos, :);
 quad.mu_minus = quad.mu(neg);
 quad.w_minus = quad.w(neg);
 quad.B_minus = quad.B(neg, :);
-
-if model.is_partial
-    quad.interval_index = partial_interval_index(model.mu_edges, quad.mu);
-end
 
 end
 
@@ -63,26 +64,30 @@ else
 end
 end
 
-function idx = partial_interval_index(edges, mu)
-k = numel(edges) - 1;
-idx = zeros(size(mu));
-for j = 1:k
-    if j < k
-        mask = mu >= edges(j) & mu < edges(j + 1);
-    else
-        mask = mu >= edges(j) & mu <= edges(j + 1);
-    end
-    idx(mask) = j;
-end
-end
-
-function [mu, w] = piecewise_lobatto(edges, qOrder)
+function [mu, w, interval_id] = piecewise_lobatto(edges, qOrder)
 mu = [];
 w = [];
+interval_id = [];
 for j = 1:(numel(edges) - 1)
     [mj, wj] = gauss_lobatto(qOrder, edges(j), edges(j + 1));
     mu = [mu; mj(:)]; %#ok<AGROW>
     w = [w; wj(:)]; %#ok<AGROW>
+    interval_id = [interval_id; j * ones(numel(mj), 1)]; %#ok<AGROW>
+end
+end
+
+function B = build_partial_basis_with_interval_ids(model, mu, interval_id)
+nQ = numel(mu);
+B = zeros(nQ, model.nMom);
+
+for q = 1:nQ
+    j = interval_id(q);
+    if j < 1 || j > model.kIntervals
+        continue;
+    end
+    col = 2 * j - 1;
+    B(q, col) = 1.0;
+    B(q, col + 1) = mu(q);
 end
 end
 
