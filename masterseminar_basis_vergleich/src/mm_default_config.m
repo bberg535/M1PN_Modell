@@ -42,8 +42,9 @@ cfg.optimizer.change_of_basis_cond = 1.0e10;
 
 cfg.reconstruction = struct();
 cfg.reconstruction.use_characteristic = true;
-% PMMn uses the Section-5.2 block generalized eigensolver for characteristic reconstruction.
-cfg.reconstruction.use_characteristic_partial_entropy = true;
+% PMMn is numerically fragile with characteristic reconstruction on the
+% nonsmooth plane-source benchmark; keep the default component-wise.
+cfg.reconstruction.use_characteristic_partial_entropy = false;
 
 cfg.limiter = struct();
 cfg.limiter.type = 'paper';

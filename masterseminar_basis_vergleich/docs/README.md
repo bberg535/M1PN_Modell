@@ -51,7 +51,7 @@ Limiter selection:
 ```matlab
 cfg = mm_default_config();
 cfg.limiter.type = 'paper'; % or 'mcl'
-cfg.reconstruction.use_characteristic_partial_entropy = true; % PMMn via Section-5.2 block eigensolver
+cfg.reconstruction.use_characteristic_partial_entropy = false; % PMMn default: component-wise reconstruction
 cfg.limiter.paper_lp_characteristic = false; % legacy scalar paper limiter (default)
 % cfg.limiter.paper_lp_characteristic = true;  % NEW: characteristic-component LP limiter for PN/MN
 cfg.io.close_figures = true; % false => figures stay open
@@ -77,6 +77,7 @@ reproduce_paper1_figures_3_6
 What is new (paper limiter path):
 
 - Characteristic reconstruction now computes Section-5.2 eigenvectors from `J z = lambda H z` instead of finite-difference Jacobians; PMMn uses 2x2 block generalized eigenproblems.
+- PMMn keeps component-wise reconstruction as the default in plane-source runs; characteristic PMMn remains available via `cfg.reconstruction.use_characteristic_partial_entropy = true`.
 - `paper_lp_characteristic = false`: old scalar limiter path (unchanged behavior)
 - `paper_lp_characteristic = true`: NEW LP limiter in characteristic components for `PN/MN` (Eq.-5.25 style), with automatic fallback to the old scalar limiter if the LP is infeasible
 

@@ -21,8 +21,9 @@ cfg.parallel.pool_type = 'local';
 cfg.parallel.num_workers = 8;
 cfg.parallel.force_serial_partial_entropy = true;
 
-% Make PMMn behavior explicit (Section-5.2 block generalized eigensolver).
-cfg.reconstruction.use_characteristic_partial_entropy = true;
+% Make PMMn behavior explicit: component-wise reconstruction is currently
+% more robust on the plane-source benchmark than characteristic PMMn.
+cfg.reconstruction.use_characteristic_partial_entropy = false;
 cfg.optimizer.use_change_of_basis_partial_entropy = false;
 
 fprintf('[run_model] use_characteristic_partial_entropy = %d\n', cfg.reconstruction.use_characteristic_partial_entropy);
