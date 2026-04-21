@@ -121,13 +121,9 @@ step_state.timing = combine_holo_stage_timing(s1, s2, sync_stage1, sync_final, t
         if use_par_cells
             parfor ic = 1:nCells
                 if rec_cfg.use_characteristic
-                    J = flux_jacobian_fd(u_pn_stage(:, ic), model_pn, quad_pn, opt_cfg);
-                    [V, D] = eig(J);
-                    if any(~isfinite(V(:))) || any(~isfinite(diag(D)))
-                        V = eye(nMomPn);
-                    end
+                    [V, Vinv, ~] = mm_characteristic_basis(u_pn_stage(:, ic), model_pn, quad_pn, opt_cfg, struct());
                     V_cells{ic} = V;
-                    Vinv_cells{ic} = pinv(V);
+                    Vinv_cells{ic} = Vinv;
                 else
                     V_cells{ic} = eye(nMomPn);
                     Vinv_cells{ic} = eye(nMomPn);
@@ -136,13 +132,9 @@ step_state.timing = combine_holo_stage_timing(s1, s2, sync_stage1, sync_final, t
         else
             for ic = 1:nCells
                 if rec_cfg.use_characteristic
-                    J = flux_jacobian_fd(u_pn_stage(:, ic), model_pn, quad_pn, opt_cfg);
-                    [V, D] = eig(J);
-                    if any(~isfinite(V(:))) || any(~isfinite(diag(D)))
-                        V = eye(nMomPn);
-                    end
+                    [V, Vinv, ~] = mm_characteristic_basis(u_pn_stage(:, ic), model_pn, quad_pn, opt_cfg, struct());
                     V_cells{ic} = V;
-                    Vinv_cells{ic} = pinv(V);
+                    Vinv_cells{ic} = Vinv;
                 else
                     V_cells{ic} = eye(nMomPn);
                     Vinv_cells{ic} = eye(nMomPn);
@@ -421,28 +413,6 @@ else
 end
 [g(:, nCells + 1), ~] = mm_kinetic_flux(uR(:, nCells), uBRight, model, quad_flux, struct('opt_cfg', opt_cfg));
 
-end
-
-function J = flux_jacobian_fd(u, model, quad_flux, opt_cfg)
-n = numel(u);
-J = zeros(n, n);
-[f0, ~] = mm_eval_flux_function(u, model, quad_flux, opt_cfg, struct());
-
-for j = 1:n
-    e = zeros(n, 1);
-    scale = max(1.0, abs(u(j)));
-    epsFD = 1.0e-7 * scale;
-    e(j) = epsFD;
-
-    [fp, ~] = mm_eval_flux_function(u + e, model, quad_flux, opt_cfg, struct());
-    [fm, ~] = mm_eval_flux_function(u - e, model, quad_flux, opt_cfg, struct());
-
-    J(:, j) = (fp - fm) / (2 * epsFD);
-end
-
-if any(~isfinite(J(:)))
-    J = eye(n) * max(1, norm(f0));
-end
 end
 
 function rho = boundary_density(side, t, phys)

@@ -58,8 +58,7 @@ step_state.timing = combine_stage_timing(s1, s2, toc(tFluxTotal));
         if use_par_cells
             parfor ic = 1:nCells
                 if use_char_recon
-                    J = flux_jacobian_fd(u_stage(:, ic), model, quad_flux, opt_cfg);
-                    [V, Vinv] = stable_characteristic_basis(J);
+                    [V, Vinv, ~] = mm_characteristic_basis(u_stage(:, ic), model, quad_flux, opt_cfg, struct());
                     V_cells{ic} = V;
                     Vinv_cells{ic} = Vinv;
                 else
@@ -70,8 +69,7 @@ step_state.timing = combine_stage_timing(s1, s2, toc(tFluxTotal));
         else
             for ic = 1:nCells
                 if use_char_recon
-                    J = flux_jacobian_fd(u_stage(:, ic), model, quad_flux, opt_cfg);
-                    [V, Vinv] = stable_characteristic_basis(J);
+                    [V, Vinv, ~] = mm_characteristic_basis(u_stage(:, ic), model, quad_flux, opt_cfg, struct());
                     V_cells{ic} = V;
                     Vinv_cells{ic} = Vinv;
                 else
@@ -253,72 +251,6 @@ end
 theta_i = lo;
 bar_ok_i = true;
 g_i = g_lo_i + theta_i * A;
-end
-
-function J = flux_jacobian_fd(u, model, quad_flux, opt_cfg)
-n = numel(u);
-J = zeros(n, n);
-[f0, ~] = mm_eval_flux_function(u, model, quad_flux, opt_cfg, struct());
-
-for j = 1:n
-    e = zeros(n, 1);
-    scale = max(1.0, abs(u(j)));
-    epsFD = 1.0e-7 * scale;
-    e(j) = epsFD;
-
-    [fp, ~] = mm_eval_flux_function(u + e, model, quad_flux, opt_cfg, struct());
-    [fm, ~] = mm_eval_flux_function(u - e, model, quad_flux, opt_cfg, struct());
-
-    J(:, j) = (fp - fm) / (2 * epsFD);
-end
-
-if any(~isfinite(J(:)))
-    J = eye(n) * max(1, norm(f0));
-end
-end
-
-function [V, Vinv] = stable_characteristic_basis(J)
-nLoc = size(J, 1);
-V = eye(nLoc);
-Vinv = eye(nLoc);
-
-if any(~isfinite(J(:)))
-    return;
-end
-
-[Vraw, D] = eig(J);
-lam = diag(D);
-
-if any(~isfinite(Vraw(:))) || any(~isfinite(lam))
-    return;
-end
-
-lamScale = max(1.0, max(abs(real(lam))));
-if any(abs(imag(lam)) > 1.0e-10 * lamScale)
-    return;
-end
-
-[~, perm] = sort(real(lam), 'ascend');
-Vtmp = real(Vraw(:, perm));
-
-for j = 1:nLoc
-    [~, imax] = max(abs(Vtmp(:, j)));
-    if ~isempty(imax) && Vtmp(imax, j) < 0
-        Vtmp(:, j) = -Vtmp(:, j);
-    end
-end
-
-if rcond(Vtmp) < 1.0e-12 || any(~isfinite(Vtmp(:)))
-    return;
-end
-
-VinvTmp = Vtmp \ eye(nLoc);
-if any(~isfinite(VinvTmp(:)))
-    return;
-end
-
-V = Vtmp;
-Vinv = VinvTmp;
 end
 
 function [flux, uB] = boundary_interface_flux(side, uCell, model, quad_flux, opt_cfg, phys, t)

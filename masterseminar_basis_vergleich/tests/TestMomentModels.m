@@ -88,6 +88,28 @@ classdef TestMomentModels < matlab.unittest.TestCase
             end
         end
 
+        function testCharacteristicBasisSection52(testCase)
+            cfg = mm_default_config();
+            cases = {'PN', 3; 'MN', 3; 'HFPn', 4; 'HFMn', 4; 'PMPn', 4; 'PMMn', 4};
+            psi = @(mu) 0.35 + 0.08 * mu + 0.04 * mu.^2;
+
+            for icase = 1:size(cases, 1)
+                model = mm_build_model(cases{icase, 1}, cases{icase, 2}, cfg.models);
+                quad = mm_build_quadrature(model, cfg.quad, 'flux');
+                u = mm_project_density_to_moments(psi, model, quad);
+
+                [V, Vinv, st] = mm_characteristic_basis(u, model, quad, cfg.optimizer, struct());
+
+                testCase.verifyTrue(st.success, sprintf('Characteristic basis failed for %s-%d', model.name, model.order));
+                testCase.verifyLessThan(norm(Vinv * V - eye(model.nMom), Inf), 1e-8);
+                testCase.verifyLessThan(st.residual_inf, 1e-7);
+                testCase.verifyFalse(any(abs(imag(V(:))) > 0));
+                if strcmp(model.family, 'partial')
+                    testCase.verifyEqual(st.method, 'partial-block-generalized');
+                end
+            end
+        end
+
         function testEntropySolverIsotropic(testCase)
             cfg = mm_default_config();
             model = mm_build_model('PMMn', 4, cfg.models);
@@ -99,6 +121,32 @@ classdef TestMomentModels < matlab.unittest.TestCase
 
             testCase.verifyTrue(all(isfinite(alpha)));
             testCase.verifyTrue(info.converged);
+        end
+
+        function testEntropySolverReflectionSymmetry(testCase)
+            cfg = mm_default_config();
+            cases = {'MN', 3; 'PMMn', 4; 'HFMn', 4};
+            psi = @(mu) exp(1.1 * mu);
+
+            for icase = 1:size(cases, 1)
+                model = mm_build_model(cases{icase, 1}, cases{icase, 2}, cfg.models);
+                quad = mm_build_quadrature(model, cfg.quad, 'flux');
+                R = model.reflection_matrix;
+
+                u = mm_project_density_to_moments(psi, model, quad);
+                uRef = mm_project_density_to_moments(@(mu) psi(-mu), model, quad);
+
+                testCase.verifyLessThan(norm(uRef - R * u, Inf), 1e-10);
+
+                [alpha, info] = mm_entropy_dual_solve(u, model, quad, cfg.optimizer, struct());
+                [alphaRef, infoRef] = mm_entropy_dual_solve(uRef, model, quad, cfg.optimizer, struct());
+
+                testCase.verifyTrue(info.converged);
+                testCase.verifyTrue(infoRef.converged);
+                testCase.verifyEqual(info.regularization_r, infoRef.regularization_r, 'AbsTol', 0);
+                testCase.verifyEqual(logical(info.reflection_canonicalized), ~logical(infoRef.reflection_canonicalized));
+                testCase.verifyLessThan(norm(alphaRef - R * alpha, Inf), 1e-9);
+            end
         end
 
         function testPaper1TrendAndExactness(testCase)

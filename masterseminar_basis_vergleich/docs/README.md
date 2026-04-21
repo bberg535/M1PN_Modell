@@ -19,6 +19,7 @@ This subproject implements a slab-geometry reimplementation of the two Schneider
 - `quad = mm_build_quadrature(model, cfg_quad, purpose)`
 - `u = mm_project_density_to_moments(psi_handle, model, quad)`
 - `[alpha, info] = mm_entropy_dual_solve(u, model, quad, opt_cfg, cache_state)`
+- `[V, Vinv, state] = mm_characteristic_basis(u, model, quad_flux, opt_cfg, cache_state)`
 - `[uL, uR, rec_state] = mm_reconstruct_characteristic(u_cell, jac_state, grid, rec_cfg)`
 - `[uL_lim, uR_lim, lim_state] = mm_apply_realizability_limiter(uCell, uL, uR, model, lim_cfg, quad)`
 - `[flux, flux_state] = mm_kinetic_flux(uL, uR, model, quad, flux_cfg)`
@@ -50,6 +51,7 @@ Limiter selection:
 ```matlab
 cfg = mm_default_config();
 cfg.limiter.type = 'paper'; % or 'mcl'
+cfg.reconstruction.use_characteristic_partial_entropy = true; % PMMn via Section-5.2 block eigensolver
 cfg.limiter.paper_lp_characteristic = false; % legacy scalar paper limiter (default)
 % cfg.limiter.paper_lp_characteristic = true;  % NEW: characteristic-component LP limiter for PN/MN
 cfg.io.close_figures = true; % false => figures stay open
@@ -74,6 +76,7 @@ reproduce_paper1_figures_3_6
 
 What is new (paper limiter path):
 
+- Characteristic reconstruction now computes Section-5.2 eigenvectors from `J z = lambda H z` instead of finite-difference Jacobians; PMMn uses 2x2 block generalized eigenproblems.
 - `paper_lp_characteristic = false`: old scalar limiter path (unchanged behavior)
 - `paper_lp_characteristic = true`: NEW LP limiter in characteristic components for `PN/MN` (Eq.-5.25 style), with automatic fallback to the old scalar limiter if the LP is infeasible
 

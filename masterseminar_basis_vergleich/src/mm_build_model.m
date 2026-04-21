@@ -35,6 +35,7 @@ switch name
         model.realizability = 'lp';
         model.is_partial = false;
         model.is_hat = false;
+        model.reflection_matrix = diag((-1) .^ (0:N));
 
     case {'HFPN', 'HFMN'}
         % Piecewise linear hat basis h_i on interval partition, Eq. (3.3a).
@@ -53,6 +54,7 @@ switch name
         model.realizability = 'positive';
         model.is_partial = false;
         model.is_hat = true;
+        model.reflection_matrix = flip(eye(n), 2);
 
     case {'PMPN', 'PMMN'}
         % Piecewise first-order partial moments p_{I_j}, Definition 3.6.
@@ -74,6 +76,7 @@ switch name
         model.realizability = 'interval';
         model.is_partial = true;
         model.is_hat = false;
+        model.reflection_matrix = partial_reflection_matrix(k);
 
     otherwise
         error('Unknown model name: %s', model_name);
@@ -232,5 +235,15 @@ for j = 1:k
     m01 = 0.5 * (b^2 - a^2);
     m11 = (b^3 - a^3) / 3.0;
     M(idx:idx+1, idx:idx+1) = [m00, m01; m01, m11];
+end
+end
+
+function R = partial_reflection_matrix(k)
+R = zeros(2*k, 2*k);
+for j = 1:k
+    idx = (2*j - 1):(2*j);
+    idx_ref = (2*(k + 1 - j) - 1):(2*(k + 1 - j));
+    R(idx_ref(1), idx(1)) = 1.0;
+    R(idx_ref(2), idx(2)) = -1.0;
 end
 end

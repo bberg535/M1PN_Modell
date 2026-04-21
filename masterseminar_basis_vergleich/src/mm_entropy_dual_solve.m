@@ -42,23 +42,28 @@ if rho < opt.rho_vac
     info.vacuum_regularized = true;
 end
 
-beta0 = zeros(n, 1);
+% The normalized problem has rho(phi)=1, so the isotropic multiplier is
+% alpha1*log(1/<1>) rather than zero.
+beta0 = model.alpha1 * log(1.0 / model.h1);
 if isfield(cache_state, 'last_alpha') && numel(cache_state.last_alpha) == n
     beta0 = cache_state.last_alpha(:);
 elseif isfield(cache_state, 'alpha0') && numel(cache_state.alpha0) == n
     beta0 = cache_state.alpha0(:);
 end
 
+[u_work, beta0_work, was_reflected] = canonicalize_reflection_state(u, beta0, model);
+info.reflection_canonicalized = was_reflected;
+
 B = quad.B;
 w = quad.w;
 
 for rr = 1:numel(opt.regularization_r)
     r = opt.regularization_r(rr);
-    u_try = (1 - r) * u + r * (model.G * u);
+    u_try = (1 - r) * u_work + r * (model.G * u_work);
     rho_try = model.alpha1.' * u_try;
     phi = u_try / rho_try;
 
-    beta = beta0;
+    beta = beta0_work;
     d_last = zeros(n, 1);
 
     for k = 1:opt.max_iter
@@ -95,7 +100,7 @@ for rr = 1:numel(opt.regularization_r)
             info.criterion2 = crit2;
 
             if crit2
-                alpha = alpha_try;
+                alpha = undo_reflection_state(alpha_try, was_reflected, model);
                 info.converged = true;
                 info.iterations = k;
                 info.regularization_r = r;
@@ -145,11 +150,54 @@ for rr = 1:numel(opt.regularization_r)
 end
 
 % Fallback to isotropic multiplier.
-rho_fallback = max(model.alpha1.' * u, opt.rho_vac);
-alpha = model.alpha1 * log(rho_fallback / model.h1);
+rho_fallback = max(model.alpha1.' * u_work, opt.rho_vac);
+alpha_work = model.alpha1 * log(rho_fallback / model.h1);
+alpha = undo_reflection_state(alpha_work, was_reflected, model);
 info.converged = false;
 info.cached_alpha = alpha;
 
+end
+
+function [u_can, beta0_can, reflected] = canonicalize_reflection_state(u, beta0, model)
+u_can = u;
+beta0_can = beta0;
+reflected = false;
+
+if ~isfield(model, 'reflection_matrix') || isempty(model.reflection_matrix)
+    return;
+end
+
+R = model.reflection_matrix;
+u_ref = R * u;
+beta0_ref = R * beta0;
+
+if should_use_reflected_state(u, u_ref)
+    u_can = u_ref;
+    beta0_can = beta0_ref;
+    reflected = true;
+end
+end
+
+function alpha = undo_reflection_state(alpha_work, reflected, model)
+alpha = alpha_work;
+if reflected && isfield(model, 'reflection_matrix') && ~isempty(model.reflection_matrix)
+    alpha = model.reflection_matrix * alpha_work;
+end
+end
+
+function tf = should_use_reflected_state(u, u_ref)
+d = u - u_ref;
+scale = max(1.0, max(abs([u(:); u_ref(:)])));
+tol = 1.0e-12 * scale;
+idx = find(abs(d) > tol, 1, 'first');
+
+if isempty(idx)
+    tf = false;
+else
+    % Choose a canonical orientation using the first reflection-sensitive
+    % component so mirrored states follow the same regularization path.
+    tf = d(idx) < 0;
+end
 end
 
 function d = compute_newton_direction(H, g, use_change_of_basis)
