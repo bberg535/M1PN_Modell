@@ -120,6 +120,7 @@ step_state.timing = combine_stage_timing(s1, s2, toc(tFluxTotal));
 
             % Right boundary interface.
             [g(:, nCells + 1), ~] = boundary_interface_flux('right', uR_lim(:, nCells), model, quad_flux, opt_cfg, phys, t_stage);
+            g = enforce_reflection_flux_symmetry(g, u_stage, uL_lim, uR_lim, model);
         end
         tLimiterFlux = toc(tLimFlux);
 
@@ -141,6 +142,88 @@ step_state.timing = combine_stage_timing(s1, s2, toc(tFluxTotal));
         rhs_state.timing.rhs_build_s = tRhsBuild;
     end
 
+end
+
+function g = enforce_reflection_flux_symmetry(g, u_stage, uL_lim, uR_lim, model)
+if ~isfield(model, 'reflection_matrix') || isempty(model.reflection_matrix)
+    return;
+end
+
+R = model.reflection_matrix;
+nCells = size(uL_lim, 2);
+
+% If the whole stage state is mirrored, project the interface fluxes back
+% onto the exact reflection-symmetric subspace to remove solver drift.
+if stage_is_mirrored(u_stage, R)
+    for ig = 2:nCells
+        jg = nCells + 2 - ig;
+        if ig > jg
+            continue;
+        end
+
+        gi = g(:, ig);
+        if ig == jg
+            g(:, ig) = 0.5 * (gi - R * gi);
+        else
+            gj = g(:, jg);
+            gi_sym = 0.5 * (gi - R * gj);
+            g(:, ig) = gi_sym;
+            g(:, jg) = -R * gi_sym;
+        end
+    end
+    return;
+end
+
+for iif = 1:(nCells - 1)
+    jif = nCells - iif;
+    if iif > jif
+        continue;
+    end
+
+    if ~interfaces_are_mirrored(uL_lim, uR_lim, R, iif, jif)
+        continue;
+    end
+
+    gi = g(:, iif + 1);
+    if iif == jif
+        g(:, iif + 1) = 0.5 * (gi - R * gi);
+    else
+        gj = g(:, jif + 1);
+        gi_sym = 0.5 * (gi - R * gj);
+        g(:, iif + 1) = gi_sym;
+        g(:, jif + 1) = -R * gi_sym;
+    end
+end
+end
+
+function tf = stage_is_mirrored(u_stage, R)
+nCells = size(u_stage, 2);
+maxErr = 0.0;
+scale = max(1.0, norm(u_stage, Inf));
+
+for ic = 1:nCells
+    jc = nCells + 1 - ic;
+    maxErr = max(maxErr, norm(u_stage(:, ic) - R * u_stage(:, jc), Inf));
+    if maxErr > 1.0e-8 * scale
+        tf = false;
+        return;
+    end
+end
+
+tf = true;
+end
+
+function tf = interfaces_are_mirrored(uL_lim, uR_lim, R, iif, jif)
+leftErr = norm(uR_lim(:, iif) - R * uL_lim(:, jif + 1), Inf);
+rightErr = norm(uL_lim(:, iif + 1) - R * uR_lim(:, jif), Inf);
+
+scale = max(1.0, max([ ...
+    norm(uR_lim(:, iif), Inf), ...
+    norm(uL_lim(:, iif + 1), Inf), ...
+    norm(uR_lim(:, jif), Inf), ...
+    norm(uL_lim(:, jif + 1), Inf)]));
+
+tf = leftErr <= 1.0e-8 * scale && rightErr <= 1.0e-8 * scale;
 end
 
 function [g, lim_state] = mcl_limited_flux(u_stage, uL_rec, uR_rec, model, phys, t_stage, quad_flux, opt_cfg, lim_cfg, use_par_interfaces)

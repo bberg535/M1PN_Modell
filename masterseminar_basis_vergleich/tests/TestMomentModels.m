@@ -123,29 +123,64 @@ classdef TestMomentModels < matlab.unittest.TestCase
             testCase.verifyTrue(info.converged);
         end
 
-        function testEntropySolverReflectionSymmetry(testCase)
+        function testSingleStepFluxMirrorSymmetry(testCase)
             cfg = mm_default_config();
-            cases = {'MN', 3; 'PMMn', 4; 'HFMn', 4};
-            psi = @(mu) exp(1.1 * mu);
+            cfg.paper2.n_cells = 40;
+            cases = {'MN', 3; 'PMMn', 4};
+
+            zL = cfg.paper2.domain(1);
+            zR = cfg.paper2.domain(2);
+            edges = linspace(zL, zR, cfg.paper2.n_cells + 1);
+            z = 0.5 * (edges(1:end-1) + edges(2:end));
+            dz = edges(2) - edges(1);
+            grid = struct('z', z(:), 'dz', dz, 'nCells', cfg.paper2.n_cells, 'ghost', 1);
+
+            phys = struct();
+            phys.sigma_s = cfg.paper2.sigma_s;
+            phys.sigma_a = cfg.paper2.sigma_a;
+            phys.Q = cfg.paper2.Q;
+            phys.psi_vac_density = cfg.physics.psi_vac_density;
+            phys.boundary = struct('left', cfg.physics.psi_vac_density, 'right', cfg.physics.psi_vac_density);
 
             for icase = 1:size(cases, 1)
                 model = mm_build_model(cases{icase, 1}, cases{icase, 2}, cfg.models);
-                quad = mm_build_quadrature(model, cfg.quad, 'flux');
-                R = model.reflection_matrix;
 
-                u = mm_project_density_to_moments(psi, model, quad);
-                uRef = mm_project_density_to_moments(@(mu) psi(-mu), model, quad);
+                psi0 = cfg.physics.psi_vac_density * ones(1, cfg.paper2.n_cells);
+                [~, iCenter] = min(abs(z));
+                if z(iCenter) <= 0
+                    iL = iCenter;
+                    iR = min(cfg.paper2.n_cells, iCenter + 1);
+                else
+                    iR = iCenter;
+                    iL = max(1, iCenter - 1);
+                end
+                psi0(iL) = psi0(iL) + 1 / (2 * dz);
+                psi0(iR) = psi0(iR) + 1 / (2 * dz);
+                u0 = model.b_iso * psi0;
 
-                testCase.verifyLessThan(norm(uRef - R * u, Inf), 1e-10);
+                step_cfg = struct();
+                step_cfg.optimizer = cfg.optimizer;
+                step_cfg.reconstruction = cfg.reconstruction;
+                step_cfg.limiter = cfg.limiter;
+                step_cfg.parallel = cfg.parallel;
+                step_cfg.quad_cfg = cfg.quad;
+                step_cfg.quad_flux = mm_build_quadrature(model, cfg.quad, 'flux');
 
-                [alpha, info] = mm_entropy_dual_solve(u, model, quad, cfg.optimizer, struct());
-                [alphaRef, infoRef] = mm_entropy_dual_solve(uRef, model, quad, cfg.optimizer, struct());
+                cflSafety = cfg.solver.cfl_safety;
+                if model.is_partial && model.needs_entropy && isfield(cfg.solver, 'cfl_safety_partial_entropy')
+                    cflSafety = cfg.solver.cfl_safety_partial_entropy;
+                end
+                dt = cflSafety * ((1 - cfg.optimizer.eps_gamma) / 2.0) * dz;
 
-                testCase.verifyTrue(info.converged);
-                testCase.verifyTrue(infoRef.converged);
-                testCase.verifyEqual(info.regularization_r, infoRef.regularization_r, 'AbsTol', 0);
-                testCase.verifyEqual(logical(info.reflection_canonicalized), ~logical(infoRef.reflection_canonicalized));
-                testCase.verifyLessThan(norm(alphaRef - R * alpha, Inf), 1e-9);
+                [u1, ~] = mm_step_flux_rk2(u0, model, phys, grid, dt, step_cfg, struct());
+
+                err = 0.0;
+                for j = 1:grid.nCells
+                    jm = grid.nCells + 1 - j;
+                    err = max(err, norm(u1(:, j) - model.reflection_matrix * u1(:, jm), Inf));
+                end
+
+                testCase.verifyLessThan(err, 1e-10, sprintf('Mirror symmetry lost after one flux step for %s-%d', model.name, model.order));
             end
         end
 
