@@ -9,6 +9,10 @@ end
 opt_cfg = get_field_or(flux_cfg, 'opt_cfg', struct());
 cacheL = get_field_or(flux_cfg, 'cache_left', struct());
 cacheR = get_field_or(flux_cfg, 'cache_right', struct());
+alphaL_pre = get_field_or(flux_cfg, 'alpha_left', []);
+alphaR_pre = get_field_or(flux_cfg, 'alpha_right', []);
+infoL_pre = get_field_or(flux_cfg, 'info_left', struct());
+infoR_pre = get_field_or(flux_cfg, 'info_right', struct());
 
 uL = uL(:);
 uR = uR(:);
@@ -19,8 +23,19 @@ infoL = struct();
 infoR = struct();
 
 if model.needs_entropy
-    [alphaL, infoL] = mm_entropy_dual_solve(uL, model, quad, opt_cfg, cacheL);
-    [alphaR, infoR] = mm_entropy_dual_solve(uR, model, quad, opt_cfg, cacheR);
+    if ~isempty(alphaL_pre)
+        alphaL = alphaL_pre(:);
+        infoL = infoL_pre;
+    else
+        [alphaL, infoL] = mm_entropy_dual_solve(uL, model, quad, opt_cfg, cacheL);
+    end
+
+    if ~isempty(alphaR_pre)
+        alphaR = alphaR_pre(:);
+        infoR = infoR_pre;
+    else
+        [alphaR, infoR] = mm_entropy_dual_solve(uR, model, quad, opt_cfg, cacheR);
+    end
 
     psiL_plus = exp(min(quad.B_plus * alphaL, 700));
     psiR_minus = exp(min(quad.B_minus * alphaR, 700));

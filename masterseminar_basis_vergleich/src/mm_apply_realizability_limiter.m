@@ -284,7 +284,7 @@ ub = [inf(2 * nQ, 1); ones(nMom, 1)];
 if isfield(model, 'lp_options')
     options = model.lp_options;
 else
-    options = optimoptions('linprog', 'Display', 'none', 'Algorithm', 'dual-simplex');
+    options = linprog_options();
 end
 
 try
@@ -299,6 +299,14 @@ if ok
     theta = x((2 * nQ + 1):end);
 else
     theta = ones(nMom, 1);
+end
+end
+
+function options = linprog_options()
+if exist('optimoptions', 'file') == 2
+    options = optimoptions('linprog', 'Display', 'none', 'Algorithm', 'dual-simplex');
+else
+    options = optimset('Display', 'off');
 end
 end
 

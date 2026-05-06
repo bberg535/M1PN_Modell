@@ -69,7 +69,7 @@ b = u;
 if isfield(model, 'lp_options')
     options = model.lp_options;
 else
-    options = optimoptions('linprog', 'Display', 'none', 'Algorithm', 'dual-simplex');
+    options = linprog_options();
 end
 
 nQ = size(B, 2);
@@ -85,5 +85,13 @@ if flag
     margin = 1.0;
 else
     margin = -1.0;
+end
+end
+
+function options = linprog_options()
+if exist('optimoptions', 'file') == 2
+    options = optimoptions('linprog', 'Display', 'none', 'Algorithm', 'dual-simplex');
+else
+    options = optimset('Display', 'off');
 end
 end

@@ -100,27 +100,55 @@ step_state.timing = combine_stage_timing(s1, s2, toc(tFluxTotal));
                 lim_cfg_apply.characteristic_basis = jac_state;
             end
             [uL_lim, uR_lim, lim_state] = mm_apply_realizability_limiter(u_stage, uL_rec, uR_rec, model, lim_cfg_apply, quad_flux);
+            entropy_rec_state = struct('available', false, 'failed_cells', false(1, nCells), ...
+                'n_failed_cells', 0, 'left_alpha', [], 'right_alpha', []);
+            if model.needs_entropy
+                [uL_lim, uR_lim, entropy_rec_state] = ...
+                    prepare_entropy_reconstructed_states(u_stage, uL_lim, uR_lim, model, quad_flux, opt_cfg);
+            end
             g = zeros(nMom, nCells + 1);
 
             % Left boundary interface.
-            [g(:, 1), ~] = boundary_interface_flux('left', uL_lim(:, 1), model, quad_flux, opt_cfg, phys, t_stage);
+            if entropy_rec_state.available
+                left_alpha = entropy_rec_state.left_alpha(:, 1);
+            else
+                left_alpha = [];
+            end
+            [g(:, 1), ~] = boundary_interface_flux('left', uL_lim(:, 1), model, quad_flux, opt_cfg, phys, t_stage, left_alpha);
 
             % Interior interfaces.
             if use_par_interfaces && nCells > 1
                 g_int = zeros(nMom, nCells - 1);
                 parfor iif = 1:(nCells - 1)
-                    [g_int(:, iif), ~] = mm_kinetic_flux(uR_lim(:, iif), uL_lim(:, iif + 1), model, quad_flux, struct('opt_cfg', opt_cfg));
+                    flux_cfg_int = struct('opt_cfg', opt_cfg);
+                    if entropy_rec_state.available
+                        flux_cfg_int.alpha_left = entropy_rec_state.right_alpha(:, iif);
+                        flux_cfg_int.alpha_right = entropy_rec_state.left_alpha(:, iif + 1);
+                    end
+                    [g_int(:, iif), ~] = mm_kinetic_flux(uR_lim(:, iif), uL_lim(:, iif + 1), model, quad_flux, flux_cfg_int);
                 end
                 g(:, 2:nCells) = g_int;
             else
                 for iif = 1:(nCells - 1)
-                    [g(:, iif + 1), ~] = mm_kinetic_flux(uR_lim(:, iif), uL_lim(:, iif + 1), model, quad_flux, struct('opt_cfg', opt_cfg));
+                    flux_cfg_int = struct('opt_cfg', opt_cfg);
+                    if entropy_rec_state.available
+                        flux_cfg_int.alpha_left = entropy_rec_state.right_alpha(:, iif);
+                        flux_cfg_int.alpha_right = entropy_rec_state.left_alpha(:, iif + 1);
+                    end
+                    [g(:, iif + 1), ~] = mm_kinetic_flux(uR_lim(:, iif), uL_lim(:, iif + 1), model, quad_flux, flux_cfg_int);
                 end
             end
 
             % Right boundary interface.
-            [g(:, nCells + 1), ~] = boundary_interface_flux('right', uR_lim(:, nCells), model, quad_flux, opt_cfg, phys, t_stage);
+            if entropy_rec_state.available
+                right_alpha = entropy_rec_state.right_alpha(:, nCells);
+            else
+                right_alpha = [];
+            end
+            [g(:, nCells + 1), ~] = boundary_interface_flux('right', uR_lim(:, nCells), model, quad_flux, opt_cfg, phys, t_stage, right_alpha);
             g = enforce_reflection_flux_symmetry(g, u_stage, uL_lim, uR_lim, model);
+            lim_state.reconstructed_entropy_fallback_cells = entropy_rec_state.failed_cells;
+            lim_state.reconstructed_entropy_fallback_count = entropy_rec_state.n_failed_cells;
         end
         tLimiterFlux = toc(tLimFlux);
 
@@ -336,15 +364,70 @@ bar_ok_i = true;
 g_i = g_lo_i + theta_i * A;
 end
 
-function [flux, uB] = boundary_interface_flux(side, uCell, model, quad_flux, opt_cfg, phys, t)
+function [stateL, stateR, rec_state] = prepare_entropy_reconstructed_states(u_stage, uL_in, uR_in, model, quad_flux, opt_cfg)
+[nMom, nCells] = size(u_stage);
+stateL = uL_in;
+stateR = uR_in;
+
+rec_state = struct();
+rec_state.available = true;
+rec_state.left_alpha = zeros(nMom, nCells);
+rec_state.right_alpha = zeros(nMom, nCells);
+rec_state.failed_cells = false(1, nCells);
+
+for ic = 1:nCells
+    [alphaL, infoL] = mm_entropy_dual_solve(stateL(:, ic), model, quad_flux, opt_cfg, struct());
+    [alphaR, infoR] = mm_entropy_dual_solve(stateR(:, ic), model, quad_flux, opt_cfg, struct());
+    rec_state.left_alpha(:, ic) = alphaL(:);
+    rec_state.right_alpha(:, ic) = alphaR(:);
+    rec_state.failed_cells(ic) = ~(infoL.converged && infoR.converged);
+end
+
+if isfield(model, 'reflection_matrix') && ~isempty(model.reflection_matrix) && ...
+        stage_is_mirrored(u_stage, model.reflection_matrix)
+    for ic = 1:nCells
+        jc = nCells + 1 - ic;
+        if rec_state.failed_cells(ic) || rec_state.failed_cells(jc)
+            rec_state.failed_cells(ic) = true;
+            rec_state.failed_cells(jc) = true;
+        end
+    end
+end
+
+failed_idx = find(rec_state.failed_cells);
+for k = 1:numel(failed_idx)
+    ic = failed_idx(k);
+    stateL(:, ic) = u_stage(:, ic);
+    stateR(:, ic) = u_stage(:, ic);
+    [alphaBar, ~] = mm_entropy_dual_solve(u_stage(:, ic), model, quad_flux, opt_cfg, struct());
+    rec_state.left_alpha(:, ic) = alphaBar(:);
+    rec_state.right_alpha(:, ic) = alphaBar(:);
+end
+
+rec_state.n_failed_cells = numel(failed_idx);
+end
+
+function [flux, uB] = boundary_interface_flux(side, uCell, model, quad_flux, opt_cfg, phys, t, cell_alpha)
+if nargin < 8
+    cell_alpha = [];
+end
+
 rhoB = boundary_density(side, t, phys);
 
 if ~has_boundary_psi(side, phys)
     uB = model.b_iso * rhoB;
     if strcmp(side, 'left')
-        [flux, ~] = mm_kinetic_flux(uB, uCell, model, quad_flux, struct('opt_cfg', opt_cfg));
+        flux_cfg = struct('opt_cfg', opt_cfg);
+        if ~isempty(cell_alpha)
+            flux_cfg.alpha_right = cell_alpha(:);
+        end
+        [flux, ~] = mm_kinetic_flux(uB, uCell, model, quad_flux, flux_cfg);
     else
-        [flux, ~] = mm_kinetic_flux(uCell, uB, model, quad_flux, struct('opt_cfg', opt_cfg));
+        flux_cfg = struct('opt_cfg', opt_cfg);
+        if ~isempty(cell_alpha)
+            flux_cfg.alpha_left = cell_alpha(:);
+        end
+        [flux, ~] = mm_kinetic_flux(uCell, uB, model, quad_flux, flux_cfg);
     end
     return;
 end
@@ -353,8 +436,12 @@ psiB = eval_boundary_psi(side, quad_flux.mu, t, phys, rhoB);
 psiB = max(psiB(:), 0.0);
 uB = quad_flux.B.' * (quad_flux.w .* psiB);
 
-[psiCell, ~, ~] = mm_eval_ansatz(uCell, model, quad_flux, opt_cfg, struct());
-psiCell = max(psiCell(:), 0.0);
+if model.needs_entropy && ~isempty(cell_alpha)
+    psiCell = exp(min(quad_flux.B * cell_alpha(:), 700));
+else
+    [psiCell, ~, ~] = mm_eval_ansatz(uCell, model, quad_flux, opt_cfg, struct());
+    psiCell = max(psiCell(:), 0.0);
+end
 
 if strcmp(side, 'left')
     psiInPlus = eval_boundary_psi('left', quad_flux.mu_plus, t, phys, rhoB);

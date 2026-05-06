@@ -36,15 +36,16 @@ cfg.optimizer.grad_tol = 1.0e-11;
 cfg.optimizer.regularization_r = [0, 1.0e-8, 1.0e-6, 1.0e-4, 1.0e-3, 1.0e-2, 5.0e-2, 0.1, 0.5, 1.0];
 cfg.optimizer.rho_vac = 1.0e-8;
 cfg.optimizer.use_change_of_basis = true;
-% PMMn tends to be more robust without Jacobian basis scaling in the dual Newton solve.
-cfg.optimizer.use_change_of_basis_partial_entropy = false;
+% Seminarquelle 2, Section 5.1.1 uses the adaptive change of basis for
+% first-order partial moments.
+cfg.optimizer.use_change_of_basis_partial_entropy = true;
 cfg.optimizer.change_of_basis_cond = 1.0e10;
 
 cfg.reconstruction = struct();
 cfg.reconstruction.use_characteristic = true;
-% PMMn is numerically fragile with characteristic reconstruction on the
-% nonsmooth plane-source benchmark; keep the default component-wise.
-cfg.reconstruction.use_characteristic_partial_entropy = false;
+% Seminarquelle 2, Sections 4.2.1 and 5 reconstruct in characteristic
+% variables, including the partial-moment models.
+cfg.reconstruction.use_characteristic_partial_entropy = true;
 
 cfg.limiter = struct();
 cfg.limiter.type = 'paper';
@@ -54,7 +55,7 @@ cfg.limiter.lp_bisect_iter = 32;
 cfg.limiter.mcl_bisect_iter = 40;
 cfg.limiter.mcl_lambda = 1.0;
 % Optional paper-style LP limiter in characteristic components (Eq. 5.25-like).
-cfg.limiter.paper_lp_characteristic = false;
+cfg.limiter.paper_lp_characteristic = true;
 
 cfg.solver = struct();
 cfg.solver.cfl_safety = 0.9;

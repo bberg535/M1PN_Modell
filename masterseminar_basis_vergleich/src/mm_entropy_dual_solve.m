@@ -28,6 +28,7 @@ info.regularization_r = NaN;
 info.vacuum_regularized = false;
 info.criterion1 = false;
 info.criterion2 = false;
+info.used_isotropic_fallback = false;
 
 rho = model.alpha1.' * u;
 if rho <= 0
@@ -150,6 +151,7 @@ end
 rho_fallback = max(model.alpha1.' * u, opt.rho_vac);
 alpha = model.alpha1 * log(rho_fallback / model.h1);
 info.converged = false;
+info.used_isotropic_fallback = true;
 info.cached_alpha = alpha;
 
 end
