@@ -109,12 +109,16 @@ end
 
 function s = model_curve_label(model_name, order)
 switch char(model_name)
+    case 'MN'
+        prefix = 'M';
     case 'PN'
         prefix = 'P';
     case 'HFMn'
         prefix = 'HFM';
     case 'HFPn'
         prefix = 'HFP';
+    case 'PMMn'
+        prefix = 'PMM';
     case 'PMPn'
         prefix = 'PMP';
     otherwise

@@ -1,10 +1,9 @@
 function out = reproduce_seminarquelle2_figures_1_4(mode)
-%REPRODUCE_SEMINARQUELLE2_FIGURES_1_4 Recreate selected plane-source plots from Seminarquelle 2.
-% Selected model families:
-%   - Figure 1: PN with orders 3, 7, 51
-%   - Figure 2: HFMn / HFPn with orders 4, 8, 52
-%   - Figure 3: PMPn with orders 4, 8, 52
-%   - Figure 4: convergence plot for PN, HFMn, HFPn, PMPn
+%REPRODUCE_SEMINARQUELLE2_FIGURES_1_4 Recreate Seminarquelle 2 plane-source Figures 1-4.
+% Figure 1: MN / PN with orders 3, 7, 51
+% Figure 2: HFMn / HFPn with orders 4, 8, 52
+% Figure 3: PMMn / PMPn with orders 4, 8, 52
+% Figure 4: convergence plot for HFMn, HFPn, PMMn, PMPn, MN, PN
 %
 % Usage:
 %   reproduce_seminarquelle2_figures_1_4()
@@ -27,7 +26,7 @@ cfg.limiter.type = 'paper';
 cfg.timing.enabled = false;
 cfg.timing.collect_step_breakdown = false;
 cfg.timing.print_summary = false;
-cfg.models.families = {'PN', 'HFMn', 'HFPn', 'PMPn'};
+cfg.models.families = {'MN', 'PN', 'HFMn', 'HFPn', 'PMMn', 'PMPn'};
 
 % Use a local process pool when the Parallel Computing Toolbox is available.
 use_parallel = has_parallel_toolbox();
@@ -51,20 +50,24 @@ fprintf('[seminarquelle2] parallel=%d\n', cfg.parallel.enabled);
 
 res = run_paper2_plane_source(cfg);
 
-fig1_panels = make_panel_spec('PN', profile_orders.PN, '(a) P_N', 'x', '\rho');
+fig1_panels = [ ...
+    make_panel_spec('MN', profile_orders.MN, '(a) MN', 'x', '\rho'), ...
+    make_panel_spec('PN', profile_orders.PN, '(b) PN', 'x', '\rho')];
 fig2_panels = [ ...
     make_panel_spec('HFMn', profile_orders.HFMn, '(a) HFM_n', 'z', 'u_0'), ...
     make_panel_spec('HFPn', profile_orders.HFPn, '(b) HFP_n', 'z', 'u_0')];
-fig3_panels = make_panel_spec('PMPn', profile_orders.PMPn, '(a) PMP_n', 'z', 'u_0');
+fig3_panels = [ ...
+    make_panel_spec('PMMn', profile_orders.PMMn, '(a) PMM_n', 'z', 'u_0'), ...
+    make_panel_spec('PMPn', profile_orders.PMPn, '(b) PMP_n', 'z', 'u_0')];
 
 out.figure1 = mm_plot_seminarquelle2_profiles( ...
-    cfg.paths.results, fig1_panels, fullfile(cfg.paths.results, 'seminarquelle2_fig1_pn'), cfg.io);
+    cfg.paths.results, fig1_panels, fullfile(cfg.paths.results, 'seminarquelle2_fig1_full_moments'), cfg.io);
 out.figure2 = mm_plot_seminarquelle2_profiles( ...
     cfg.paths.results, fig2_panels, fullfile(cfg.paths.results, 'seminarquelle2_fig2_hf'), cfg.io);
 out.figure3 = mm_plot_seminarquelle2_profiles( ...
-    cfg.paths.results, fig3_panels, fullfile(cfg.paths.results, 'seminarquelle2_fig3_pmp'), cfg.io);
+    cfg.paths.results, fig3_panels, fullfile(cfg.paths.results, 'seminarquelle2_fig3_partial_moments'), cfg.io);
 out.figure4 = mm_plot_seminarquelle2_convergence( ...
-    res.table, {'HFMn', 'HFPn', 'PMPn', 'PN'}, ...
+    res.table, {'HFMn', 'HFPn', 'PMMn', 'PMPn', 'MN', 'PN'}, ...
     fullfile(cfg.paths.results, 'seminarquelle2_fig4_convergence'), cfg.io);
 
 out.results_dir = cfg.paths.results;
@@ -85,14 +88,18 @@ switch lower(char(mode))
         cfg.paper2.n_cells = 1000;
         cfg.reference.n_cells = 300;
         cfg.reference.n_mu = 64;
+        cfg.models.orders.MN = 3:2:51;
         cfg.models.orders.PN = 3:2:51;
         cfg.models.orders.HFMn = 4:2:52;
         cfg.models.orders.HFPn = 4:2:52;
+        cfg.models.orders.PMMn = 4:2:52;
         cfg.models.orders.PMPn = 4:2:52;
 
+        profile_orders.MN = [3, 7, 51];
         profile_orders.PN = [3, 7, 51];
         profile_orders.HFMn = [4, 8, 52];
         profile_orders.HFPn = [4, 8, 52];
+        profile_orders.PMMn = [4, 8, 52];
         profile_orders.PMPn = [4, 8, 52];
 
     case 'smoke'
@@ -100,14 +107,18 @@ switch lower(char(mode))
         cfg.paper2.n_cells = 120;
         cfg.reference.n_cells = 360;
         cfg.reference.n_mu = 96;
+        cfg.models.orders.MN = [3, 7];
         cfg.models.orders.PN = [3, 7];
         cfg.models.orders.HFMn = [4, 8];
         cfg.models.orders.HFPn = [4, 8];
+        cfg.models.orders.PMMn = [4, 8];
         cfg.models.orders.PMPn = [4, 8];
 
+        profile_orders.MN = [3, 7];
         profile_orders.PN = [3, 7];
         profile_orders.HFMn = [4, 8];
         profile_orders.HFPn = [4, 8];
+        profile_orders.PMMn = [4, 8];
         profile_orders.PMPn = [4, 8];
 
     otherwise

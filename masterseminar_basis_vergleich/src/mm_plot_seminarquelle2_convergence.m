@@ -2,7 +2,7 @@ function out = mm_plot_seminarquelle2_convergence(T, families, out_base, io_cfg)
 %MM_PLOT_SEMINARQUELLE2_CONVERGENCE Create paper-like convergence plot for the plane-source benchmark.
 
 if nargin < 2 || isempty(families)
-    families = {'HFMn', 'HFPn', 'PMPn', 'PN'};
+    families = {'HFMn', 'HFPn', 'PMMn', 'PMPn', 'MN', 'PN'};
 end
 if nargin < 4 || isempty(io_cfg)
     io_cfg = struct();
@@ -106,8 +106,12 @@ switch char(family)
         sty = struct('color', [0.2, 0.45, 0.9], 'line', '-', 'marker', 'o', 'label', 'HFM_n');
     case 'HFPn'
         sty = struct('color', [0.2, 0.45, 0.9], 'line', '--', 'marker', 'o', 'label', 'HFP_n');
+    case 'PMMn'
+        sty = struct('color', [0.95, 0.65, 0.05], 'line', '-', 'marker', '^', 'label', 'PMM_n');
     case 'PMPn'
         sty = struct('color', [0.95, 0.65, 0.05], 'line', '--', 'marker', '^', 'label', 'PMP_n');
+    case 'MN'
+        sty = struct('color', [0.0, 0.65, 0.2], 'line', '-', 'marker', 'p', 'label', 'M_N');
     case 'PN'
         sty = struct('color', [0.0, 0.65, 0.2], 'line', '--', 'marker', 'p', 'label', 'P_N');
     otherwise
