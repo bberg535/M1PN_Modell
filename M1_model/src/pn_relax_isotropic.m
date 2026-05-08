@@ -1,6 +1,17 @@
 function u_out = pn_relax_isotropic(u_in, N, dt, sigma_a, sigma_s, q)
 % Kollision/Absorption und Quelle für das PN-Modell
     Nz = size(u_in,2);
+    sigma_a = reshape(sigma_a, 1, []);
+    sigma_s = reshape(sigma_s, 1, []);
+    if isscalar(q)
+        q = q * ones(1, Nz);
+    else
+        q = reshape(q, 1, []);
+    end
+    if numel(sigma_a) ~= Nz || numel(sigma_s) ~= Nz || numel(q) ~= Nz
+        error('pn_relax_isotropic:dimensionMismatch', ...
+            'sigma_a, sigma_s and q must have length %d.', Nz);
+    end
 
     % Transformations- und Basisvektoren/Matrizen
     [xi,w] = gausslegendre(N+1);

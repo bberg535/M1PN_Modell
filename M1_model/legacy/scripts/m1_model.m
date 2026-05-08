@@ -6,56 +6,49 @@
 %   https://doi.org/10.1142/13466 für alle anderen Gleichungen
 
 clear;
+script_dir = fileparts(mfilename('fullpath'));
+addpath(fileparts(fileparts(script_dir)));
+paths = setup_project_paths(); %#ok<NASGU>
 
 %% Eingabewerte
 % Verfahren bestimmen: 1 [MCL]; -1 [LLF]; sonst [LW]
-ilim = 2;
+ilim = 1;
+method = select_flux_method(ilim);
 
 % Größen für die Diskretisierung
 N = 1;         % N fest, da M1-Modell
-NPN = 3;
 dt = 0.001;
 dz = 0.002;    % CFL: dt < dz
 Nz = 2/dz;
 cfl = dt/dz;
-T = 1;
+T = 1.5;
 
 % Flussfunktion
 flux = @(u) ([u(2,:); u(3,:)]); fluxj = @(u) 1;
 
 % Absorptions- und Streuungsterm
-sigma_a = (dz .* ones(Nz,1))';
-sigma_s = (dz .* ones(Nz,1))';
+sigma_a = 0 * (dz .* ones(Nz,1))';
+sigma_s = 0 * (dz .* ones(Nz,1))';
+source_strength = 0.0;
 
 % Anfangswerte
 rho0 = [1/dz;zeros(Nz-1,1)];
 u = zeros(N+1, Nz);
-uPN = zeros(NPN+1, Nz);
 u(1,:) = rho0.'; 
-uPN(1,:) = rho0.';
+
+
 
 %% Zeitschleife
-for t = 0:dt:T
-    switch ilim
-        case 1
-            method = @MCL;
-        case -1
-            method = @LLF;
-        otherwise
-            method = @LW;
-    end  
-    
-    uPN = advance_pn(uPN, NPN, method);
+num_steps = round(T / dt);
+if abs(num_steps * dt - T) > 1e-12 * max(1, T)
+    error('m1_model:timeGridMismatch', ...
+        'T=%.16g is not an integer multiple of dt=%.16g.', T, dt);
+end
 
+for step = 1:num_steps
+    t = step * dt;
     % Zeitschritt mit SSP Heuns Method
-    u = heuns_method(u, uPN, dt, dz, flux, fluxj, Nz, sigma_a, sigma_s, method);
-
-
-
-    U_new = [u(1,:); u(2,:)];
-
-    uPN = ls_fit_PN_lsqlin(uPN, U_new, M);
-
+    u = advance_m1(u, dt, dz, flux, fluxj, Nz, sigma_a, sigma_s, method, source_strength);
     mass = sum(u(1,:)) * dz; 
     fprintf('t = %.3f, mass = %.10e\n', t, mass);
 end
