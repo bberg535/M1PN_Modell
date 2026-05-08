@@ -496,6 +496,12 @@ if model.needs_entropy
             iterations_cells(ic) = get_field_or(info_i, 'iterations', 0);
 
             cell_i = struct('alpha', alpha_i, 'flux', f_i(:), 'info', info_i);
+            if isfield(f_state, 'psi') && ~isempty(f_state.psi)
+                cell_i.psi = f_state.psi(:);
+            end
+            if isfield(f_state, 'block_moments') && ~isempty(f_state.block_moments)
+                cell_i.block_moments = f_state.block_moments;
+            end
             if use_char_recon
                 tChar = tic;
                 [V_i, Vinv_i, char_state_i] = mm_characteristic_basis(u_stage(:, ic), model, quad_flux, opt_cfg, cell_i);
@@ -532,6 +538,12 @@ if model.needs_entropy
             iterations_cells(ic) = get_field_or(info_i, 'iterations', 0);
 
             cell_i = struct('alpha', alpha_i, 'flux', f_i(:), 'info', info_i);
+            if isfield(f_state, 'psi') && ~isempty(f_state.psi)
+                cell_i.psi = f_state.psi(:);
+            end
+            if isfield(f_state, 'block_moments') && ~isempty(f_state.block_moments)
+                cell_i.block_moments = f_state.block_moments;
+            end
             if use_char_recon
                 tChar = tic;
                 [V_i, Vinv_i, char_state_i] = mm_characteristic_basis(u_stage(:, ic), model, quad_flux, opt_cfg, cell_i);

@@ -10,14 +10,16 @@ if isfield(cache_state, 'flux') && numel(cache_state.flux) == model.nMom
     f = cache_state.flux(:);
     state = struct('alpha', get_field_or(cache_state, 'alpha', []), ...
         'aux', struct('from_cache', true, 'info', get_field_or(cache_state, 'info', struct())), ...
-        'psi', get_field_or(cache_state, 'psi', []), 'from_cache', true);
+        'psi', get_field_or(cache_state, 'psi', []), ...
+        'block_moments', get_field_or(cache_state, 'block_moments', []), ...
+        'from_cache', true);
     return;
 end
 
 [psi, alpha, aux] = mm_eval_ansatz(u, model, quad_flux, opt_cfg, cache_state);
 
 f = quad_flux.B.' * (quad_flux.w .* quad_flux.mu .* psi);
-state = struct('alpha', alpha, 'aux', aux, 'psi', psi, 'from_cache', false);
+state = struct('alpha', alpha, 'aux', aux, 'psi', psi, 'block_moments', [], 'from_cache', false);
 
 end
 
