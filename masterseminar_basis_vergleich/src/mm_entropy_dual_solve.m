@@ -63,8 +63,12 @@ for ib = 1:k
 
     a = block_model.mu_edges(1);
     b = block_model.mu_edges(2);
-    check_fun = @(v) check_partial_block_realizable(v, a, b);
-    [alpha_b, info_b] = solve_entropy_problem(u(idx), block_model, block_quad.B, block_quad.w, opt, block_cache, check_fun);
+    [alpha_b, info_b, ok_b] = solve_partial_block_analytic(u(idx), block_model, opt, block_cache);
+    if ~ok_b
+        check_fun = @(v) check_partial_block_realizable(v, a, b);
+        [alpha_b, info_b] = solve_entropy_problem(u(idx), block_model, block_quad.B, block_quad.w, opt, block_cache, check_fun);
+        info_b.method = 'partial-block-newton-fallback';
+    end
 
     alpha(idx) = alpha_b(:);
     info.block_info{ib} = info_b;
@@ -84,6 +88,67 @@ info.vacuum_regularized = any_vac;
 info.criterion1 = all_crit1;
 info.criterion2 = all_crit2;
 info.used_isotropic_fallback = any_iso_fallback;
+info.cached_alpha = alpha;
+end
+
+function [alpha, info, ok] = solve_partial_block_analytic(u, block_model, opt, cache_state)
+info = init_info();
+info.method = 'partial-block-analytic';
+ok = false;
+
+a = block_model.mu_edges(1);
+b = block_model.mu_edges(2);
+h = 0.5 * (b - a);
+m = 0.5 * (a + b);
+
+u = u(:);
+u0_raw = u(1);
+if u0_raw <= 0
+    u = block_model.u_iso_vec * opt.rho_vac;
+    info.vacuum_regularized = true;
+end
+
+alpha0 = get_cached_alpha0(cache_state, 2);
+if numel(alpha0) == 2
+    x0 = h * alpha0(2);
+else
+    x0 = 0.0;
+end
+
+for rr = 1:numel(opt.regularization_r)
+    r = opt.regularization_r(rr);
+    u_try = (1 - r) * u + r * (block_model.G * u);
+    u0 = u_try(1);
+    if u0 <= 0
+        continue;
+    end
+
+    mean_mu = u_try(2) / u0;
+    [x, nIter, okSolve] = invert_truncated_exponential_mean(mean_mu, a, b, x0);
+    if ~okSolve
+        continue;
+    end
+
+    kappa = x / h;
+    scale0 = 2.0 * h * sinhc_local(x);
+    alpha_try = [log(u0 / scale0) - kappa * m; kappa];
+    u_alpha = partial_block_moments_from_alpha(alpha_try, a, b);
+
+    info.iterations = nIter;
+    info.regularization_r = r;
+    info.criterion1 = norm(u_alpha - u_try, 2) <= max(opt.grad_tol, 1.0e-12 * max(1.0, norm(u_try, 2)));
+    info.criterion2 = check_partial_block_realizable(u_try - (1 - opt.eps_gamma) * u_alpha, a, b);
+    if info.criterion1 && info.criterion2
+        alpha = alpha_try;
+        info.converged = true;
+        info.cached_alpha = alpha;
+        ok = true;
+        return;
+    end
+end
+
+alpha = [log(max(u(1), opt.rho_vac) / (b - a)); 0.0];
+info.used_isotropic_fallback = true;
 info.cached_alpha = alpha;
 end
 
@@ -274,7 +339,118 @@ function tf = check_partial_block_realizable(u, a, b)
 u = u(:);
 u0 = u(1);
 u1 = u(2);
-tf = (u0 > 0) && ((u1 - a * u0) > 0) && ((b * u0 - u1) > 0);
+tol = 1.0e-12 * max(1.0, norm(u, Inf));
+tf = (u0 > -tol) && ((u1 - a * u0) > -tol) && ((b * u0 - u1) > -tol);
+end
+
+function [x, nIter, ok] = invert_truncated_exponential_mean(mean_mu, a, b, x0)
+h = 0.5 * (b - a);
+m = 0.5 * (a + b);
+y = (mean_mu - m) / h;
+y = min(max(y, -1.0 + 1.0e-12), 1.0 - 1.0e-12);
+
+if abs(y) <= 1.0e-14
+    x = 0.0;
+    nIter = 0;
+    ok = true;
+    return;
+end
+
+xMax = 60.0;
+if ~isfinite(x0)
+    x0 = 0.0;
+end
+x = min(max(x0, -xMax), xMax);
+if abs(x) <= 1.0e-14
+    x = 3.0 * y / max(1.0e-12, 1.0 - y^2);
+    x = min(max(x, -xMax), xMax);
+end
+
+ok = false;
+for nIter = 1:12
+    [Lx, dLx] = langevin_local(x);
+    F = Lx - y;
+    if abs(F) <= 1.0e-13
+        ok = true;
+        return;
+    end
+    if ~isfinite(dLx) || dLx <= 0
+        break;
+    end
+
+    xNew = x - F / dLx;
+    if ~isfinite(xNew) || abs(xNew) > xMax
+        break;
+    end
+    x = xNew;
+end
+
+if y > 0
+    lo = 0.0;
+    hi = xMax;
+else
+    lo = -xMax;
+    hi = 0.0;
+end
+
+for nIter = nIter:(nIter + 48)
+    mid = 0.5 * (lo + hi);
+    Lmid = langevin_value(mid);
+    if abs(Lmid - y) <= 1.0e-13
+        x = mid;
+        ok = true;
+        return;
+    end
+    if Lmid < y
+        lo = mid;
+    else
+        hi = mid;
+    end
+end
+
+x = 0.5 * (lo + hi);
+ok = isfinite(x);
+end
+
+function u = partial_block_moments_from_alpha(alpha, a, b)
+h = 0.5 * (b - a);
+m = 0.5 * (a + b);
+x = alpha(2) * h;
+u0 = exp(alpha(1) + alpha(2) * m) * (2.0 * h * sinhc_local(x));
+u1 = u0 * (m + h * langevin_value(x));
+u = [u0; u1];
+end
+
+function [Lx, dLx] = langevin_local(x)
+if abs(x) < 1.0e-6
+    x2 = x * x;
+    Lx = x / 3.0 - (x * x2) / 45.0 + (2.0 * x * x2 * x2) / 945.0;
+    dLx = 1.0 / 3.0 - x2 / 15.0 + (2.0 * x2 * x2) / 189.0;
+    return;
+end
+
+tx = tanh(x);
+Lx = (1.0 / tx) - (1.0 / x);
+sx = sinh(x);
+dLx = (1.0 / (x * x)) - (1.0 / (sx * sx));
+end
+
+function Lx = langevin_value(x)
+if abs(x) < 1.0e-6
+    x2 = x * x;
+    Lx = x / 3.0 - (x * x2) / 45.0 + (2.0 * x * x2 * x2) / 945.0;
+else
+    Lx = (1.0 / tanh(x)) - (1.0 / x);
+end
+end
+
+function y = sinhc_local(x)
+if abs(x) < 1.0e-6
+    x2 = x * x;
+    y = 1.0 + x2 / 6.0 + (x2 * x2) / 120.0;
+else
+    y = sinh(x) / x;
+end
 end
 
 function block_model = build_partial_block_model(model, ib)

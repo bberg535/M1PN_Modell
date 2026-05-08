@@ -13,7 +13,7 @@ if exist('gcp', 'file') == 2 || exist('gcp', 'builtin') == 5
 end
 
 cfg = mm_default_config();
-cfg.models.families = {'PMMn'}
+cfg.models.families = {'PMMn'};
 cfg.models.orders.PMMn = [4, 8];
 cfg.parallel.enabled = true;
 cfg.parallel.mode = 'single-run';

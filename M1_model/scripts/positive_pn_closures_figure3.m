@@ -12,14 +12,13 @@ addpath(fileparts(script_dir));
 setup_project_paths();
 
 cfg = struct();
-cfg.N = 3;
+cfg.N = 1;
 cfg.dt = 1.0e-3;
 cfg.dz = 2.0e-3;
 cfg.tf = 1.0;
 cfg.domain_length = 2.0;
 cfg.sigma = 1.0;
 cfg.mu_eval = linspace(-1.0, 1.0, 1000);
-paper_peak_z = 0.68;
 pn_method = 1;
 m1_method = -1;
 pn_ho_method = 1;
@@ -49,8 +48,6 @@ u_m1 = simulate_m1(rho0, cfg.dt, cfg.dz, num_steps, m1_method, ...
 
 pn_ref_obs = pn_observables(pn_ref.u);
 pn_mcl_obs = pn_observables(u_pn_mcl);
-pn_aux_obs = pn_observables(uPN_aux);
-[~, paper_peak_idx] = min(abs(pn_ref.z - paper_peak_z));
 
 G = diag(2 ./ (2 .* (0:cfg.N) + 1));
 p_eval = legpoly_eval(cfg.mu_eval, cfg.N);
@@ -58,15 +55,24 @@ pn_mcl_coeff = G \ u_pn_mcl;
 pn_mcl_reconstruction = pn_mcl_coeff.' * p_eval;
 aux_coeff = G \ uPN_aux;
 aux_reconstruction = aux_coeff.' * p_eval;
+[m1_reconstruction, m1_min_reconstruction] = m1_entropy_reconstruction(u_m1, cfg.mu_eval);
+[m1pn_reconstruction, m1pn_min_reconstruction] = m1_entropy_reconstruction(u_m1pn, cfg.mu_eval);
 
-paper_peak_profile_ref = pn_ref.reconstruction(paper_peak_idx, :).';
-paper_peak_profile_pn_mcl = pn_mcl_reconstruction(paper_peak_idx, :).';
-paper_peak_profile_m1pn = aux_reconstruction(paper_peak_idx, :).';
+pn_mcl_min_reconstruction = min(pn_mcl_reconstruction, [], 2);
+pn_aux_min_reconstruction = min(aux_reconstruction, [], 2);
+[~, pn_mcl_worst_idx] = min(pn_mcl_min_reconstruction);
+[~, m1_worst_idx] = min(m1_min_reconstruction);
+[~, m1pn_worst_idx] = min(m1pn_min_reconstruction);
+
+paper_peak_profile_ref = pn_ref.worst_profile;
+paper_peak_profile_pn_mcl = pn_mcl_reconstruction(pn_mcl_worst_idx, :).';
+paper_peak_profile_m1 = m1_reconstruction(m1_worst_idx, :).';
+paper_peak_profile_m1pn = m1pn_reconstruction(m1pn_worst_idx, :).';
 
 rho_m1 = u_m1(1, :).';
 j_m1 = u_m1(2, :).';
-rho_pn_mcl = pn_mcl_obs.rho;
-j_pn_mcl = pn_mcl_obs.j;
+rho_pn_mcl = u_pn_mcl(1, :).';
+j_pn_mcl = u_pn_mcl(2, :).';
 rho_m1pn = u_m1pn(1, :).';
 j_m1pn = u_m1pn(2, :).';
 rho_l1_error_pn_mcl = cfg.dz * sum(abs(rho_pn_mcl - pn_ref.rho));
@@ -82,22 +88,23 @@ fprintf('N = %d, dt = %.6g, dz = %.6g, tf = %.6g, sigma = %.6g\n', ...
     pn_ref.N, pn_ref.dt, pn_ref.dz, pn_ref.tf, pn_ref.sigma);
 fprintf('Reference PN-SIU: min F* = %.6e at z = %.6f\n', ...
     min(pn_ref.min_reconstruction), pn_ref.worst_z);
-fprintf('%s: rho L1 = %.6e, j L1 = %.6e, min angular value = %.6e\n', ...
+fprintf('%s: rho L1 = %.6e, j L1 = %.6e, min F* = %.6e\n', ...
     pn_label, rho_l1_error_pn_mcl, j_l1_error_pn_mcl, ...
-    min(pn_mcl_obs.min_reconstruction));
-fprintf('%s: rho L1 = %.6e, j L1 = %.6e, min(rho-|j|) = %.6e\n', ...
+    min(pn_mcl_min_reconstruction));
+fprintf('%s: rho L1 = %.6e, j L1 = %.6e, min psi_ME = %.6e\n', ...
     m1_label, rho_l1_error_m1, j_l1_error_m1, ...
-    min(rho_m1 - abs(j_m1)));
-fprintf('M1PN auxiliary PN: min angular value = %.6e\n', ...
-    min(pn_aux_obs.min_reconstruction));
-fprintf('M1PN vs PN-SIU: rho L1 = %.6e, j L1 = %.6e\n', ...
-    rho_l1_error, j_l1_error);
+    min(m1_min_reconstruction));
+fprintf('M1PN: rho L1 = %.6e, j L1 = %.6e, min psi_ME = %.6e\n', ...
+    rho_l1_error, j_l1_error, min(m1pn_min_reconstruction));
+fprintf('M1PN auxiliary PN: min F* = %.6e\n', min(pn_aux_min_reconstruction));
 fprintf(['M1PN limiter: min alpha = %.6e, max alpha = %.6e, ' ...
     'limited steps = %d / %d\n'], ...
     min(holo_diag.min_alpha), max(holo_diag.max_alpha), ...
     num_limited_steps, num_steps);
-fprintf('paper peak sample for panel (d): z = %.6f\n', ...
-    pn_ref.z(paper_peak_idx));
+fprintf(['Panel (d) sample points: PN-SIU z = %.6f, PN-MCL z = %.6f, ' ...
+    'M1 z = %.6f, M1PN z = %.6f\n'], ...
+    pn_ref.worst_z, pn_ref.z(pn_mcl_worst_idx), ...
+    pn_ref.z(m1_worst_idx), pn_ref.z(m1pn_worst_idx));
 
 figure;
 
@@ -135,13 +142,15 @@ subplot(2, 2, 3)
 hold on
 plot(pn_ref.z, pn_ref.min_reconstruction, 'k', 'LineWidth', 1.1, ...
     'DisplayName', 'PN-SIU reference')
-plot(pn_ref.z, pn_mcl_obs.min_reconstruction, 'b-.', 'LineWidth', 1.1, ...
+plot(pn_ref.z, pn_mcl_min_reconstruction, 'b-.', 'LineWidth', 1.1, ...
     'DisplayName', pn_label)
-plot(pn_ref.z, pn_aux_obs.min_reconstruction, 'r--', 'LineWidth', 1.1, ...
-    'DisplayName', 'M1PN auxiliary PN')
-plot(pn_ref.z, zeros(size(pn_ref.z)), 'k:')
+plot(pn_ref.z, m1_min_reconstruction, 'g:', 'LineWidth', 1.2, ...
+    'DisplayName', m1_label)
+plot(pn_ref.z, m1pn_min_reconstruction, 'r--', 'LineWidth', 1.1, ...
+    'DisplayName', 'M1PN')
+plot(pn_ref.z, zeros(size(pn_ref.z)), 'k:', 'HandleVisibility', 'off')
 hold off
-title('(c) min_{\mu \in [-1,1]} F(\cdot,\mu)')
+title('(c) min_{\mu \in [-1,1]} \psi(\cdot,\mu)')
 xlabel('x')
 legend('Location', 'best')
 
@@ -151,17 +160,16 @@ plot(pn_ref.mu_eval, paper_peak_profile_ref, 'k', 'LineWidth', 1.1, ...
     'DisplayName', 'PN-SIU reference')
 plot(cfg.mu_eval, paper_peak_profile_pn_mcl, 'b-.', 'LineWidth', 1.1, ...
     'DisplayName', pn_label)
+plot(cfg.mu_eval, paper_peak_profile_m1, 'g:', 'LineWidth', 1.2, ...
+    'DisplayName', m1_label)
 plot(cfg.mu_eval, paper_peak_profile_m1pn, 'r--', 'LineWidth', 1.1, ...
-    'DisplayName', 'M1PN auxiliary PN')
-scatter(pn_ref.lambda, pn_ref.v(:, paper_peak_idx), 30, 'k', 'filled', ...
+    'DisplayName', 'M1PN')
+scatter(pn_ref.lambda, pn_ref.quadrature_values, 30, 'k', 'filled', ...
     'DisplayName', 'PN quadrature values')
-scatter(pn_ref.lambda, pn_mcl_obs.angular_values(:, paper_peak_idx), 30, 'b', ...
+scatter(pn_ref.lambda, pn_mcl_obs.angular_values(:, pn_mcl_worst_idx), 30, 'b', ...
     'filled', 'DisplayName', 'PN-MCL values')
-scatter(pn_ref.lambda, pn_aux_obs.angular_values(:, paper_peak_idx), 30, 'r', ...
-    'filled', 'DisplayName', 'M1PN auxiliary values')
-plot(pn_ref.mu_eval, zeros(size(pn_ref.mu_eval)), 'k:')
+plot(pn_ref.mu_eval, zeros(size(pn_ref.mu_eval)), 'k:', 'HandleVisibility', 'off')
 hold off
-title(sprintf('(d) P_%d reconstruction at z = %.2f', ...
-    pn_ref.N, pn_ref.z(paper_peak_idx)))
+title(sprintf('(d) Worst reconstruction profiles'))
 xlabel('\mu')
 legend('Location', 'best')
