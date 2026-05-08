@@ -62,9 +62,14 @@ flag = margin > 0;
 end
 
 function [flag, margin] = check_lp_realizable(u, model, quad)
+if strcmp(get_field_or(model, 'family', ''), 'full') && isfield(quad, 'lp_hull')
+    [flag, margin] = check_full_polytope(u, quad.lp_hull);
+    return;
+end
+
 % LP feasibility problem Bw=u, w>=0 (Eq. (5.26)).
-B = quad.B.';
-b = u;
+A = get_lp_matrix(quad);
+b = u(:);
 
 if isfield(model, 'lp_options')
     options = model.lp_options;
@@ -72,9 +77,9 @@ else
     options = linprog_options();
 end
 
-nQ = size(B, 2);
+nQ = size(A, 2);
 try
-    [~, ~, exitflag] = linprog(zeros(nQ, 1), [], [], B, b, zeros(nQ, 1), [], options);
+    [~, ~, exitflag] = linprog(zeros(nQ, 1), [], [], A, b, zeros(nQ, 1), [], options);
 catch
     % If optimization toolbox is unavailable in runtime, mark non-realizable.
     exitflag = -1;
@@ -85,6 +90,37 @@ if flag
     margin = 1.0;
 else
     margin = -1.0;
+end
+end
+
+function [flag, margin] = check_full_polytope(u, hull)
+u = u(:);
+u0 = u(1);
+tol = 1.0e-12 * max(1.0, norm(u, Inf));
+if u0 <= tol
+    flag = false;
+    margin = u0 - tol;
+    return;
+end
+
+if hull.dimension == 1
+    x = u(2) / u0;
+    margin = min([x - hull.bounds(1), hull.bounds(2) - x]);
+    flag = margin >= -tol;
+    return;
+end
+
+x = u(2:end) / u0;
+viol = hull.normals * x - hull.offsets;
+margin = -max(viol);
+flag = margin >= -tol;
+end
+
+function A = get_lp_matrix(quad)
+if isfield(quad, 'Bt_full') && ~isempty(quad.Bt_full)
+    A = quad.Bt_full;
+else
+    A = full(quad.B.');
 end
 end
 

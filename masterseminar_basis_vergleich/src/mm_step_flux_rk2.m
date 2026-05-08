@@ -76,14 +76,25 @@ step_state.timing = combine_stage_timing(s1, s2, toc(tFluxTotal));
         else
             lim_cfg_apply = lim_cfg;
             lim_cfg_apply.parallel = par_cfg;
-            if get_field_or(lim_cfg, 'paper_lp_characteristic', false)
-                lim_cfg_apply.characteristic_basis = jac_state;
+            apply_paper_limiter = model.needs_entropy || logical(get_field_or(lim_cfg, 'apply_to_linear_models', false));
+            if apply_paper_limiter
+                if get_field_or(lim_cfg, 'paper_lp_characteristic', false)
+                    lim_cfg_apply.characteristic_basis = jac_state;
+                end
+                tPaperLimiter = tic;
+                [uL_lim, uR_lim, lim_state] = mm_apply_realizability_limiter(u_stage, uL_rec, uR_rec, model, lim_cfg_apply, quad_flux);
+                paper_limiter_s = toc(tPaperLimiter);
+            else
+                uL_lim = uL_rec;
+                uR_lim = uR_rec;
+                lim_state = struct('theta', zeros(1, nCells), 'theta_components', zeros(nMom, nCells), ...
+                    'mode', 'bypassed_linear');
+                paper_limiter_s = 0.0;
             end
-            [uL_lim, uR_lim, lim_state] = mm_apply_realizability_limiter(u_stage, uL_rec, uR_rec, model, lim_cfg_apply, quad_flux);
 
             flux_diag = struct('entropy_reconstructed_solves_s', 0.0, ...
                 'high_order_flux_s', 0.0, 'low_order_flux_s', 0.0, ...
-                'mcl_bisection_s', 0.0);
+                'mcl_bisection_s', 0.0, 'limiter_s', paper_limiter_s);
             entropy_rec_state = struct('available', false, 'failed_cells', false(1, nCells), ...
                 'n_failed_cells', 0, 'left_alpha', [], 'right_alpha', []);
 
@@ -125,6 +136,7 @@ step_state.timing = combine_stage_timing(s1, s2, toc(tFluxTotal));
         rhs_state.timing.high_order_flux_s = flux_diag.high_order_flux_s;
         rhs_state.timing.low_order_flux_s = flux_diag.low_order_flux_s;
         rhs_state.timing.mcl_bisection_s = flux_diag.mcl_bisection_s;
+        rhs_state.timing.limiter_s = get_field_or(flux_diag, 'limiter_s', 0.0);
         rhs_state.timing.limiter_and_flux_s = tLimiterFlux;
         rhs_state.timing.rhs_build_s = tRhsBuild;
     end
@@ -218,7 +230,7 @@ function [g, lim_state, flux_timing] = mcl_limited_flux(u_stage, uL_rec, uR_rec,
 g_ho = zeros(nMom, nCells + 1);
 
 flux_timing = struct('entropy_reconstructed_solves_s', 0.0, ...
-    'high_order_flux_s', 0.0, 'low_order_flux_s', 0.0, 'mcl_bisection_s', 0.0);
+    'high_order_flux_s', 0.0, 'low_order_flux_s', 0.0, 'mcl_bisection_s', 0.0, 'limiter_s', 0.0);
 
 uL_ho = uL_rec;
 uR_ho = uR_rec;
@@ -944,6 +956,7 @@ timing.entropy_reconstructed_solves_s = get_timing_field(s1, 'entropy_reconstruc
 timing.high_order_flux_s = get_timing_field(s1, 'high_order_flux_s') + get_timing_field(s2, 'high_order_flux_s');
 timing.low_order_flux_s = get_timing_field(s1, 'low_order_flux_s') + get_timing_field(s2, 'low_order_flux_s');
 timing.mcl_bisection_s = get_timing_field(s1, 'mcl_bisection_s') + get_timing_field(s2, 'mcl_bisection_s');
+timing.limiter_s = get_timing_field(s1, 'limiter_s') + get_timing_field(s2, 'limiter_s');
 timing.limiter_and_flux_s = get_timing_field(s1, 'limiter_and_flux_s') + get_timing_field(s2, 'limiter_and_flux_s');
 timing.rhs_build_s = get_timing_field(s1, 'rhs_build_s') + get_timing_field(s2, 'rhs_build_s');
 end

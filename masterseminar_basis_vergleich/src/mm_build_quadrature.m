@@ -47,6 +47,10 @@ if ismember(model.family, {'hat', 'partial'})
 else
     quad.B = model.basis_eval(quad.mu);
 end
+quad.Bt_full = full(quad.B.');
+if strcmp(model.family, 'full') && strcmp(model.realizability, 'lp')
+    quad.lp_hull = build_fullmoment_lp_hull(quad.Bt_full);
+end
 
 pos = quad.mu >= 0;
 neg = quad.mu <= 0;
@@ -224,6 +228,49 @@ for j = 1:size(V, 2)
     V(:, j) = v;
 end
 ok = all(isfinite(V(:))) && all(isfinite(Z(:)));
+end
+
+function hull = build_fullmoment_lp_hull(Bt_full)
+points = Bt_full(2:end, :).';
+points = unique(points, 'rows', 'stable');
+d = size(points, 2);
+hull = struct('dimension', d, 'normals', [], 'offsets', [], 'bounds', []);
+
+if d == 0
+    return;
+end
+
+if d == 1
+    hull.bounds = [min(points(:, 1)), max(points(:, 1))];
+    return;
+end
+
+facets = convhulln(points);
+center = mean(points, 1);
+nFacets = size(facets, 1);
+normals = zeros(nFacets, d);
+offsets = zeros(nFacets, 1);
+
+for i = 1:nFacets
+    verts = points(facets(i, :), :);
+    base = verts(1, :).';
+    D = (verts(2:end, :) - verts(1, :)).';
+    [~, ~, V] = svd(D.', 'econ');
+    nvec = V(:, end);
+    nvec = nvec / norm(nvec);
+    offset = nvec.' * base;
+
+    if nvec.' * center(:) > offset
+        nvec = -nvec;
+        offset = -offset;
+    end
+
+    normals(i, :) = nvec(:).';
+    offsets(i) = offset;
+end
+
+hull.normals = normals;
+hull.offsets = offsets;
 end
 
 function [x, w] = gauss_lobatto(n, a, b)

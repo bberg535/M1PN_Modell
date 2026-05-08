@@ -59,8 +59,12 @@ cfg.limiter.eps_theta = 1.0e-11;
 cfg.limiter.lp_bisect_iter = 32;
 cfg.limiter.mcl_bisect_iter = 20;
 cfg.limiter.mcl_lambda = 1.0;
-% Optional paper-style LP limiter in characteristic components (Eq. 5.25-like).
-cfg.limiter.paper_lp_characteristic = true;
+% Keep the Paper-2 default limiter on by default. The characteristic LP
+% variant is much more expensive and should only be enabled explicitly.
+cfg.limiter.paper_lp_characteristic = false;
+% Keep the limiter active by default for scheme parity; this flag only
+% exists so cheaper exploratory runs can bypass it for linear closures.
+cfg.limiter.apply_to_linear_models = true;
 
 cfg.solver = struct();
 cfg.solver.cfl_safety = 0.9;
