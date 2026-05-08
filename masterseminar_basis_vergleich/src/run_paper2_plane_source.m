@@ -171,8 +171,16 @@ row.time_step_sum_s = sumStep.total_s;
 row.time_source_sum_s = sumStep.source_1_s + sumStep.source_2_s;
 row.time_flux_sum_s = sumStep.flux_s;
 row.time_flux_jacobian_sum_s = sumStep.flux_jacobian_s;
+row.time_flux_stage_cache_sum_s = sumStep.flux_stage_cache_s;
+row.time_flux_entropy_cell_solves_sum_s = sumStep.flux_entropy_cell_solves_s;
+row.time_flux_characteristic_basis_sum_s = sumStep.flux_characteristic_basis_s;
 row.time_flux_reconstruct_sum_s = sumStep.flux_reconstruct_s;
+row.time_flux_entropy_reconstructed_sum_s = sumStep.flux_entropy_reconstructed_s;
+row.time_flux_high_order_flux_sum_s = sumStep.flux_high_order_flux_s;
+row.time_flux_low_order_flux_sum_s = sumStep.flux_low_order_flux_s;
+row.time_flux_mcl_bisection_sum_s = sumStep.flux_mcl_bisection_s;
 row.time_flux_limiter_flux_sum_s = sumStep.flux_limiter_flux_s;
+row.time_flux_rhs_build_sum_s = sumStep.flux_rhs_build_s;
 
 write_model_checkpoint(cfg.paths.results, rec, z, rho, rhoRef, row);
 write_model_plot(cfg.paths.results, rec, z, rhoRef, rho);
@@ -213,9 +221,15 @@ close(fig);
 end
 
 function print_timing_summary(row)
-fprintf('[timing] %s-%d: total=%.3fs solver=%.3fs source=%.3fs flux=%.3fs jac=%.3fs rec=%.3fs lim+flux=%.3fs\n', ...
+fprintf(['[timing] %s-%d: total=%.3fs solver=%.3fs source=%.3fs flux=%.3fs ' ...
+    'cache=%.3fs entropy=%.3fs char=%.3fs rec=%.3fs recEntropy=%.3fs ' ...
+    'hi=%.3fs lo=%.3fs bisect=%.3fs rhs=%.3fs\n'], ...
     row.model, row.order, row.runtime_s, row.time_step_sum_s, row.time_source_sum_s, ...
-    row.time_flux_sum_s, row.time_flux_jacobian_sum_s, row.time_flux_reconstruct_sum_s, row.time_flux_limiter_flux_sum_s);
+    row.time_flux_sum_s, row.time_flux_stage_cache_sum_s, row.time_flux_entropy_cell_solves_sum_s, ...
+    row.time_flux_characteristic_basis_sum_s, row.time_flux_reconstruct_sum_s, ...
+    row.time_flux_entropy_reconstructed_sum_s, row.time_flux_high_order_flux_sum_s, ...
+    row.time_flux_low_order_flux_sum_s, row.time_flux_mcl_bisection_sum_s, ...
+    row.time_flux_rhs_build_sum_s);
 end
 
 function plot_plane_errors(T, outBase, closeFigures)
@@ -326,8 +340,16 @@ acc.source_1_s = 0.0;
 acc.source_2_s = 0.0;
 acc.flux_s = 0.0;
 acc.flux_jacobian_s = 0.0;
+acc.flux_stage_cache_s = 0.0;
+acc.flux_entropy_cell_solves_s = 0.0;
+acc.flux_characteristic_basis_s = 0.0;
 acc.flux_reconstruct_s = 0.0;
+acc.flux_entropy_reconstructed_s = 0.0;
+acc.flux_high_order_flux_s = 0.0;
+acc.flux_low_order_flux_s = 0.0;
+acc.flux_mcl_bisection_s = 0.0;
 acc.flux_limiter_flux_s = 0.0;
+acc.flux_rhs_build_s = 0.0;
 end
 
 function acc = accumulate_step_timing(acc, state)
@@ -341,8 +363,16 @@ acc.flux_s = acc.flux_s + get_field_or(state.timing, 'flux_s', 0.0);
 if isfield(state, 'last_flux') && isfield(state.last_flux, 'timing')
     ft = state.last_flux.timing;
     acc.flux_jacobian_s = acc.flux_jacobian_s + get_field_or(ft, 'jacobian_s', 0.0);
+    acc.flux_stage_cache_s = acc.flux_stage_cache_s + get_field_or(ft, 'stage_cache_preparation_s', 0.0);
+    acc.flux_entropy_cell_solves_s = acc.flux_entropy_cell_solves_s + get_field_or(ft, 'entropy_cell_solves_s', 0.0);
+    acc.flux_characteristic_basis_s = acc.flux_characteristic_basis_s + get_field_or(ft, 'characteristic_basis_s', 0.0);
     acc.flux_reconstruct_s = acc.flux_reconstruct_s + get_field_or(ft, 'reconstruct_s', 0.0);
+    acc.flux_entropy_reconstructed_s = acc.flux_entropy_reconstructed_s + get_field_or(ft, 'entropy_reconstructed_solves_s', 0.0);
+    acc.flux_high_order_flux_s = acc.flux_high_order_flux_s + get_field_or(ft, 'high_order_flux_s', 0.0);
+    acc.flux_low_order_flux_s = acc.flux_low_order_flux_s + get_field_or(ft, 'low_order_flux_s', 0.0);
+    acc.flux_mcl_bisection_s = acc.flux_mcl_bisection_s + get_field_or(ft, 'mcl_bisection_s', 0.0);
     acc.flux_limiter_flux_s = acc.flux_limiter_flux_s + get_field_or(ft, 'limiter_and_flux_s', 0.0);
+    acc.flux_rhs_build_s = acc.flux_rhs_build_s + get_field_or(ft, 'rhs_build_s', 0.0);
 end
 end
 

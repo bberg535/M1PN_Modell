@@ -1,37 +1,15 @@
-function Gstar = real_HO_flux(uPN, u, dt, dx, ilim, flux, nec, ~, ~, ~, ~)
-% Berechne HO- und LO-Interface-Fluesse und limitiere den Korrekturfluss.
+function [flux_star, limiter_diag, flux_ho, flux_lo] = real_HO_flux(uPN, u, N, dt, dz, pn_ho_method, boundary, psi_boundary)
+%REAL_HO_FLUX Build the limited HOLO flux for the coupled M1PN model.
+% Low-order is always the closed M1 LLF flux. The PN system only provides
+% the high-order candidate flux before fail-safe limiting.
 
-    nne = nec + 1;
-    if size(u, 2) ~= nne || size(uPN, 2) ~= nne
+    if size(u, 2) ~= size(uPN, 2)
         error('real_HO_flux:dimensionMismatch', ...
-            'Expected u and uPN to have %d columns (nec+1).', nne);
+            'Expected u and uPN to use the same number of spatial cells.');
     end
 
-    % M1-Fluss mit einheitlicher Wellengeschwindigkeit begrenzen.
-    % PN liefert nur die HO-Momente, nicht die Charakteristikgeschwindigkeit.
-    lambda = 1;
-
-    if ilim ~= -1
-        error('real_HO_flux:unsupportedCoupledMethod', ...
-            ['Coupled M1PN currently supports only ilim=-1 (LLF). ' ...
-            'Requested ilim=%d (%s).'], ilim, method_name(ilim));
-    end
-
-    pn_obs = pn_closure_observables(uPN(:, 1:nec), u(:, 1:nec));
-    pn_m2 = reshape(pn_obs.m2, 1, []);
-    pn_m2 = [pn_m2, pn_m2(1)];
-
-    Gstar = LLF(u, dt, dx, flux, lambda, pn_m2, nec);
+    flux_lo = m1_interface_flux(u, -1, dt, dz, boundary, psi_boundary);
+    pn_flux = pn_interface_flux(uPN, N, pn_ho_method, dt, dz, boundary, psi_boundary);
+    flux_ho = pn_flux(1:2, :);
+    [flux_star, limiter_diag] = failsafe_limit_density(u, flux_lo, flux_ho, dt, dz, boundary);
 end
-
-function name = method_name(ilim)
-    switch ilim
-        case 1
-            name = 'MCL';
-        case -1
-            name = 'LLF';
-        otherwise
-            name = 'LW';
-    end
-end
-

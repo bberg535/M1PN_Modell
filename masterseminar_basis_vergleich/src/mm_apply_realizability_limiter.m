@@ -334,18 +334,32 @@ Vinv = eye(nMom);
 if ~isstruct(charBasis)
     return;
 end
-if ~isfield(charBasis, 'V') || ~isfield(charBasis, 'Vinv')
-    return;
-end
-if numel(charBasis.V) < iCell || numel(charBasis.Vinv) < iCell
-    return;
-end
-if isempty(charBasis.V{iCell}) || isempty(charBasis.Vinv{iCell})
-    return;
+
+if get_field_or(charBasis, 'constant', false) && ...
+        isfield(charBasis, 'V_const') && isfield(charBasis, 'Vinv_const')
+    Vtry = charBasis.V_const;
+    VinvTry = charBasis.Vinv_const;
+elseif isfield(charBasis, 'V') && isfield(charBasis, 'Vinv') && ...
+        ~iscell(charBasis.V) && ~iscell(charBasis.Vinv)
+    Vtry = charBasis.V;
+    VinvTry = charBasis.Vinv;
+else
+    if ~isfield(charBasis, 'V') || ~isfield(charBasis, 'Vinv')
+        return;
+    end
+    if numel(charBasis.V) < iCell || numel(charBasis.Vinv) < iCell
+        return;
+    end
+    if isempty(charBasis.V{iCell}) || isempty(charBasis.Vinv{iCell})
+        return;
+    end
+    Vtry = charBasis.V{iCell};
+    VinvTry = charBasis.Vinv{iCell};
 end
 
-Vtry = charBasis.V{iCell};
-VinvTry = charBasis.Vinv{iCell};
+if isempty(Vtry) || isempty(VinvTry)
+    return;
+end
 
 if any(~isfinite(Vtry(:))) || any(~isfinite(VinvTry(:))) || size(Vtry, 1) ~= nMom || size(Vtry, 2) ~= nMom
     return;

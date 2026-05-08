@@ -1,0 +1,147 @@
+% PN vs M1PN negativity benchmark on the plane-source test.
+%
+% The benchmark uses the 1D slab setup from Section 6.1.1 ("plane source")
+% of Seminarquelle 2, but with the same benchmark convention as
+% masterseminar_basis_vergleich. Pure PN is run with a low-diffusion LW flux to expose
+% undershoots, while the coupled M1PN model uses the new HOLO/Failsafe path.
+%
+% This is intentionally not a same-flux comparison:
+% PN-LW is the stress case, M1PN-HOLO is the stabilized coupled method.
+
+clear;
+script_dir = fileparts(mfilename('fullpath'));
+addpath(fileparts(script_dir));
+setup_project_paths();
+
+%% Switches
+include_sn_reference = true;
+pn_ilim = -2;
+pn_order = 7;
+m1pn_order = pn_order;
+m1pn_pn_ho_method = -1;
+assert_negative_pn = true;
+assert_positive_m1pn = true;
+
+%% Plane-source setup
+case_cfg = plane_source_master_case('num_cells', 600);
+z = case_cfg.z;
+rho0 = case_cfg.rho0;
+dz = case_cfg.dz;
+dt = case_cfg.dt;
+T = case_cfg.T;
+num_cells = case_cfg.num_cells;
+num_steps = case_cfg.num_steps;
+sigma_a = case_cfg.sigma_a;
+sigma_s = case_cfg.sigma_s;
+source_strength = case_cfg.source_strength;
+vacuum_opts = case_cfg.vacuum_opts;
+
+ref_cfg = case_cfg.reference;
+ref_cfg.n_cells = 1200;
+ref_cfg.n_mu = 128;
+zoom_half_width = 0.2;
+
+%% Pure PN
+uPN = simulate_pn(rho0, dt, dz, num_steps, pn_order, pn_ilim, ...
+    sigma_a, sigma_s, source_strength, vacuum_opts);
+obs_pn = pn_observables(uPN);
+
+%% Coupled M1PN
+m1pn_opts = vacuum_opts;
+m1pn_opts.pn_ho_method = m1pn_pn_ho_method;
+[u_m1pn, ~, m1pn_diag] = simulate_m1pn(rho0, dt, dz, num_steps, ...
+    m1pn_order, sigma_a, sigma_s, source_strength, m1pn_opts);
+rho_m1pn = u_m1pn(1, :).';
+
+%% Optional S_N reference
+if include_sn_reference
+    sn_ref = sn_reference_plane_source(ref_cfg);
+    rho_ref = interp1(sn_ref.z, sn_ref.rho, z, 'linear', 'extrap');
+end
+
+%% Diagnostics
+[pn_min_rho, pn_min_idx] = min(obs_pn.rho);
+[m1pn_min_rho, m1pn_min_idx] = min(rho_m1pn);
+pn_negative_cells = nnz(obs_pn.rho < 0);
+m1pn_negative_cells = nnz(rho_m1pn < 0);
+
+fprintf('PN vs M1PN negativity benchmark (plane source, Section 6.1.1)\n');
+fprintf('PN-%s (N=%d):     min rho = %.6e at z = %.6f, negative cells = %d\n', ...
+    method_name(pn_ilim), pn_order, pn_min_rho, z(pn_min_idx), pn_negative_cells);
+fprintf(['M1PN-HOLO (N=%d): min rho = %.6e at z = %.6f, negative cells = %d, ' ...
+    'alpha_min = %.6e, max limited interfaces/step = %d\n'], ...
+    m1pn_order, m1pn_min_rho, z(m1pn_min_idx), m1pn_negative_cells, ...
+    min(m1pn_diag.min_alpha), max(m1pn_diag.num_limited));
+
+if include_sn_reference
+    fprintf('PN-%s rho L1 vs S_N   = %.6e\n', ...
+        method_name(pn_ilim), dz * sum(abs(obs_pn.rho - rho_ref)));
+    fprintf('M1PN-HOLO rho L1 vs S_N = %.6e\n', ...
+        dz * sum(abs(rho_m1pn - rho_ref)));
+end
+
+if assert_negative_pn && pn_min_rho >= 0
+    error('pn_m1pn_negativity_benchmark:missingPNNegativity', ...
+        'Expected negative PN density, but min(rho_PN) = %.16e.', pn_min_rho);
+end
+
+if assert_positive_m1pn && m1pn_min_rho < 0
+    error('pn_m1pn_negativity_benchmark:negativeM1PNDensity', ...
+        'Expected non-negative M1PN density, but min(rho_M1PN) = %.16e.', ...
+        m1pn_min_rho);
+end
+
+%% Plots
+plot_mask = z >= 0;
+zoom_center = z(pn_min_idx);
+zoom_mask = plot_mask & (abs(z - zoom_center) <= zoom_half_width);
+if nnz(zoom_mask) < 5
+    zoom_mask = plot_mask;
+end
+
+figure;
+
+subplot(2, 1, 1)
+hold on
+if include_sn_reference
+    plot(z(plot_mask), rho_ref(plot_mask), 'k', 'LineWidth', 1.5, ...
+        'DisplayName', 'S_N ref');
+end
+plot(z(plot_mask), obs_pn.rho(plot_mask), 'Color', [0.85, 0.33, 0.10], ...
+    'LineWidth', 1.1, 'DisplayName', sprintf('PN-%s', method_name(pn_ilim)));
+plot(z(plot_mask), rho_m1pn(plot_mask), 'Color', [0.00, 0.45, 0.74], ...
+    'LineWidth', 1.1, 'DisplayName', 'M1PN-HOLO');
+yline(0.0, 'k--', 'DisplayName', 'rho = 0');
+hold off
+legend('Location', 'best')
+title('Plane source: rho = <u> (right half-domain)')
+xlabel('z')
+ylabel('rho')
+
+subplot(2, 1, 2)
+hold on
+if include_sn_reference
+    plot(z(zoom_mask), rho_ref(zoom_mask), 'k', 'LineWidth', 1.5, ...
+        'DisplayName', 'S_N ref');
+end
+plot(z(zoom_mask), obs_pn.rho(zoom_mask), 'Color', [0.85, 0.33, 0.10], ...
+    'LineWidth', 1.1, 'DisplayName', sprintf('PN-%s', method_name(pn_ilim)));
+plot(z(zoom_mask), rho_m1pn(zoom_mask), 'Color', [0.00, 0.45, 0.74], ...
+    'LineWidth', 1.1, 'DisplayName', 'M1PN-HOLO');
+yline(0.0, 'k--', 'DisplayName', 'rho = 0');
+hold off
+legend('Location', 'best')
+title(sprintf('Zoom around PN minimum at z = %.3f', zoom_center))
+xlabel('z')
+ylabel('rho')
+
+function name = method_name(ilim)
+    switch ilim
+        case 1
+            name = 'MCL';
+        case -1
+            name = 'LLF';
+        otherwise
+            name = 'LW';
+    end
+end

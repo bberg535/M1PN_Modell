@@ -81,10 +81,12 @@ classdef TestMomentModels < matlab.unittest.TestCase
             testCase.verifyGreaterThanOrEqual(min(st.theta), 0.0);
             testCase.verifyLessThanOrEqual(max(st.theta), 1.0 + 1e-12);
 
-            for i = 1:nCells
-                [okL, ~] = mm_is_realizable(uL2(:, i), model, quad, lim);
-                [okR, ~] = mm_is_realizable(uR2(:, i), model, quad, lim);
-                testCase.verifyTrue(okL && okR);
+            if exist('linprog', 'file') == 2 || exist('linprog', 'builtin') == 5
+                for i = 1:nCells
+                    [okL, ~] = mm_is_realizable(uL2(:, i), model, quad, lim);
+                    [okR, ~] = mm_is_realizable(uR2(:, i), model, quad, lim);
+                    testCase.verifyTrue(okL && okR);
+                end
             end
         end
 
@@ -92,22 +94,51 @@ classdef TestMomentModels < matlab.unittest.TestCase
             cfg = mm_default_config();
             cases = {'PN', 3; 'MN', 3; 'HFPn', 4; 'HFMn', 4; 'PMPn', 4; 'PMMn', 4};
             psi = @(mu) 0.35 + 0.08 * mu + 0.04 * mu.^2;
+            opt = cfg.optimizer;
+            opt.check_eigen_residual = true;
+            opt.check_basis_condition = true;
 
             for icase = 1:size(cases, 1)
                 model = mm_build_model(cases{icase, 1}, cases{icase, 2}, cfg.models);
                 quad = mm_build_quadrature(model, cfg.quad, 'flux');
                 u = mm_project_density_to_moments(psi, model, quad);
 
-                [V, Vinv, st] = mm_characteristic_basis(u, model, quad, cfg.optimizer, struct());
+                [V, Vinv, st] = mm_characteristic_basis(u, model, quad, opt, struct());
 
                 testCase.verifyTrue(st.success, sprintf('Characteristic basis failed for %s-%d', model.name, model.order));
                 testCase.verifyLessThan(norm(Vinv * V - eye(model.nMom), Inf), 1e-8);
                 testCase.verifyLessThan(st.residual_inf, 1e-7);
                 testCase.verifyFalse(any(abs(imag(V(:))) > 0));
-                if strcmp(model.family, 'partial')
-                    testCase.verifyEqual(st.method, 'partial-block-generalized');
+                if model.needs_entropy && strcmp(model.family, 'partial')
+                    testCase.verifyTrue(startsWith(st.method, 'partial-block'));
                 end
             end
+        end
+
+        function testPMMNBlockCharacteristicMatchesDense(testCase)
+            cfg = mm_default_config();
+            opt = cfg.optimizer;
+            opt.check_eigen_residual = true;
+            model = mm_build_model('PMMn', 4, cfg.models);
+            quad = mm_build_quadrature(model, cfg.quad, 'flux');
+            psi = @(mu) 0.28 + 0.05 * mu + 0.03 * mu.^2;
+            u = mm_project_density_to_moments(psi, model, quad);
+
+            [V, Vinv, st] = mm_characteristic_basis(u, model, quad, opt, struct());
+            testCase.verifyTrue(st.success);
+
+            [psiVals, ~, ~] = mm_eval_ansatz(u, model, quad, cfg.optimizer, struct());
+            weights = quad.w(:) .* psiVals(:);
+            B = full(quad.B);
+            Jd = B.' * bsxfun(@times, weights .* quad.mu(:), B);
+            Hd = B.' * bsxfun(@times, weights, B);
+            Jd = 0.5 * (Jd + Jd.');
+            Hd = 0.5 * (Hd + Hd.');
+            lambdaDense = sort(real(eig(Jd, Hd)), 'ascend');
+
+            testCase.verifyLessThan(norm(sort(st.lambda) - lambdaDense, Inf), 1e-10);
+            testCase.verifyLessThan(norm((Jd / Hd) * V - V * diag(st.lambda), Inf), 1e-8);
+            testCase.verifyLessThan(norm(Vinv * V - eye(model.nMom), Inf), 1e-8);
         end
 
         function testEntropySolverIsotropic(testCase)
@@ -182,6 +213,38 @@ classdef TestMomentModels < matlab.unittest.TestCase
 
                 testCase.verifyLessThan(err, 1e-10, sprintf('Mirror symmetry lost after one flux step for %s-%d', model.name, model.order));
             end
+        end
+
+        function testFluxStepReturnsWarmCache(testCase)
+            cfg = mm_default_config();
+            phys = struct();
+            phys.sigma_s = 0.0;
+            phys.sigma_a = 0.0;
+            phys.Q = 0.0;
+            phys.psi_vac_density = cfg.physics.psi_vac_density;
+            phys.boundary = struct('left', cfg.physics.psi_vac_density, 'right', cfg.physics.psi_vac_density);
+
+            z = linspace(-0.25, 0.25, 10);
+            dz = z(2) - z(1);
+            grid = struct('z', z(:), 'dz', dz, 'nCells', numel(z), 'ghost', 1);
+
+            model = mm_build_model('PMMn', 4, cfg.models);
+            step_cfg = struct();
+            step_cfg.optimizer = cfg.optimizer;
+            step_cfg.reconstruction = cfg.reconstruction;
+            step_cfg.limiter = cfg.limiter;
+            step_cfg.parallel = cfg.parallel;
+            step_cfg.quad_cfg = cfg.quad;
+            step_cfg.quad_flux = mm_build_quadrature(model, cfg.quad, 'flux');
+
+            u0 = repmat(model.b_iso * 0.05, 1, numel(z));
+            [~, st] = mm_step_flux_rk2(u0, model, phys, grid, 0.01, step_cfg, struct());
+
+            testCase.verifyTrue(isfield(st, 'cache_state'));
+            testCase.verifyTrue(isfield(st.cache_state, 'last_alpha_cells'));
+            testCase.verifyTrue(isfield(st.cache_state, 'stage2_alpha_cells'));
+            testCase.verifyEqual(size(st.cache_state.last_alpha_cells), size(u0));
+            testCase.verifyEqual(size(st.cache_state.stage2_alpha_cells), size(u0));
         end
 
         function testPaper1TrendAndExactness(testCase)

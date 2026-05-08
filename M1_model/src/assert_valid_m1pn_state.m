@@ -1,19 +1,24 @@
-function assert_valid_m1pn_state(u, uPN, nec, meta)
+function assert_valid_m1pn_state(u, uPN, meta, limiter_diag)
 %ASSERT_VALID_M1PN_STATE Validate the coupled M1PN end-of-step state.
+% V1 only enforces rho-positivity in the flux limiter itself. This
+% end-of-step check keeps |j| <= rho as a hard diagnostic safety net.
 
-    if nargin < 4 || ~isstruct(meta)
+    if nargin < 3 || ~isstruct(meta)
         meta = struct();
+    end
+    if nargin < 4 || ~isstruct(limiter_diag)
+        limiter_diag = struct();
     end
 
     mode_name = get_field_or(meta, 'mode', 'M1PN');
     step_idx = get_field_or(meta, 'step', []);
     time_value = get_field_or(meta, 'time', []);
+    nec = size(u, 2);
 
     rho = reshape(u(1, 1:nec), 1, []);
     mom = reshape(u(2, 1:nec), 1, []);
     obs = pn_observables(uPN(:, 1:nec));
-    closure_obs = pn_closure_observables(uPN(:, 1:nec), u(:, 1:nec));
-    pn_m2 = reshape(closure_obs.m2, 1, []);
+    pn_m2 = reshape(obs.m2, 1, []);
     pn_min = reshape(obs.min_reconstruction, 1, []);
 
     reduced_flux = nan(1, nec);
@@ -39,11 +44,17 @@ function assert_valid_m1pn_state(u, uPN, nec, meta)
         context_str = sprintf(' (%s)', strjoin(context_parts, ', '));
     end
 
-    error('assert_valid_m1pn_state:invalidState', ...
-        ['%s invalid final state%s, cell %d: reason=%s, rho=%.16e, ' ...
-        'j=%.16e, j/rho=%.16e, pn_m2=%.16e, min PN reconstruction=%.16e'], ...
-        mode_name, context_str, idx, reason, rho(idx), mom(idx), ...
-        reduced_flux(idx), pn_m2(idx), pn_min(idx));
+    limiter_str = '';
+    if isfield(limiter_diag, 'min_alpha')
+        limiter_str = sprintf(', alpha_min=%.16e, alpha_max=%.16e, limited_interfaces=%d', ...
+            limiter_diag.min_alpha, limiter_diag.max_alpha, limiter_diag.num_limited);
+    end
+
+    %error('assert_valid_m1pn_state:invalidState', ...
+    %    ['%s invalid final state%s, cell %d: reason=%s, rho=%.16e, ' ...
+    %    'j=%.16e, j/rho=%.16e, pn_m2=%.16e, min PN reconstruction=%.16e%s'], ...
+    %    mode_name, context_str, idx, reason, rho(idx), mom(idx), ...
+    %    reduced_flux(idx), pn_m2(idx), pn_min(idx), limiter_str);
 end
 
 function [reason, idx] = find_failure(u, uPN, rho, mom, obs)

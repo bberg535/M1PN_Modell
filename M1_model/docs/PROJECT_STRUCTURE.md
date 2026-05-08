@@ -11,7 +11,12 @@
 - `scripts/m1pn_model.m`: Hauptskript fuer das gekoppelte M1PN-Modell
 - `scripts/m1_plane_source_benchmark.m`: Plane-Source-Benchmark gegen eine S_N-Referenz
 - `scripts/pn_m1pn_negativity_benchmark.m`: Plane-Source-Stresstest fuer PN-vs-M1PN mit Fokus auf negativen PN-Dichten
+- `scripts/positive_pn_closures_figure3.m`: Reproduktion des SIU-Plane-Source-Tests aus Figure 3 von "Positive PN Closures"
+- `docs/REFERENCES.md`: kurze Zuordnung der aktiven Implementierung zu Buch-/Paper-Quellen
 
 ## Hinweise
 - Die MATLAB-Pfade werden ueber `setup_project_paths.m` initialisiert.
 - Alte `*.asv`-Backupdateien werden nicht mitgefuehrt.
+- Legacy-Skripte und ihre alten FV-Hilfsfunktionen liegen getrennt unter `legacy/`.
+- `legacy/` ist bewusst nicht Teil des aktiven Standardpfads; die alten
+  Skripte sind archiviert, nicht Teil des verifizierten HOLO/M1PN-Pfads.

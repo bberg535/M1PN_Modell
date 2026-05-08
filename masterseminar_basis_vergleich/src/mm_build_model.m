@@ -31,7 +31,7 @@ switch name
         model.alpha1(1) = 1.0;
         model.b_iso = zeros(n, 1);
         model.b_iso(1) = 2.0;
-        model.mass_matrix = diag(2.0 ./ (2.0 * (0:N)' + 1.0));
+        model.mass_matrix = spdiags(2.0 ./ (2.0 * (0:N)' + 1.0), 0, n, n);
         model.realizability = 'lp';
         model.is_partial = false;
         model.is_hat = false;
@@ -202,7 +202,7 @@ end
 
 function M = hat_mass_matrix(edges)
 n = numel(edges);
-M = zeros(n, n);
+M = spalloc(n, n, 3 * n - 2);
 for i = 1:(n - 1)
     h = edges(i + 1) - edges(i);
     M(i, i) = M(i, i) + h / 3.0;
@@ -226,7 +226,7 @@ end
 
 function M = partial_mass_matrix(edges)
 k = numel(edges) - 1;
-M = zeros(2*k, 2*k);
+M = spalloc(2 * k, 2 * k, 4 * k);
 for j = 1:k
     a = edges(j);
     b = edges(j + 1);

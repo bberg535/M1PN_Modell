@@ -17,7 +17,24 @@ use_par_cells = par_ctx.use_parallel && nCells > 2;
 
 slopes = zeros(nMom, nCells);
 
-if use_par_cells
+if useChar && get_field_or(jac_state, 'constant', false) && ...
+        isfield(jac_state, 'V_const') && isfield(jac_state, 'Vinv_const')
+    V = jac_state.V_const;
+    Vinv = jac_state.Vinv_const;
+
+    if nCells > 2
+        duF = u(:, 3:end) - u(:, 2:end-1);
+        duB = u(:, 2:end-1) - u(:, 1:end-2);
+        duC = 0.5 * (u(:, 3:end) - u(:, 1:end-2));
+
+        cF = Vinv * duF;
+        cB = Vinv * duB;
+        cC = Vinv * duC;
+
+        cSlope = mm_minmod(cF, cB, cC) / dz;
+        slopes(:, 2:end-1) = V * cSlope;
+    end
+elseif use_par_cells
     parfor i = 2:(nCells - 1)
         duF = u(:, i + 1) - u(:, i);
         duB = u(:, i) - u(:, i - 1);

@@ -15,20 +15,85 @@ n = model.nMom;
 if ~model.needs_entropy
     alpha = model.mass_matrix \ u;
     info = struct('converged', true, 'iterations', 0, 'regularization_r', 0, ...
-        'used_linear_closure', true, 'vacuum_regularized', false);
+        'used_linear_closure', true, 'vacuum_regularized', false, ...
+        'cached_alpha', alpha, 'used_isotropic_fallback', false);
     return;
 end
 
 opt = fill_defaults(opt_cfg, model);
 
-info = struct();
-info.converged = false;
-info.iterations = 0;
-info.regularization_r = NaN;
-info.vacuum_regularized = false;
-info.criterion1 = false;
-info.criterion2 = false;
-info.used_isotropic_fallback = false;
+if strcmp(model.family, 'partial')
+    [alpha, info] = solve_partial_entropy_blocks(u, model, quad, opt, cache_state);
+    return;
+end
+
+check_fun = @(v) mm_is_realizable(v, model, quad, struct('epsR', 0));
+[alpha, info] = solve_entropy_problem(u, model, quad.B, quad.w, opt, cache_state, check_fun);
+
+end
+
+function [alpha, info] = solve_partial_entropy_blocks(u, model, quad, opt, cache_state)
+k = model.kIntervals;
+alpha = zeros(model.nMom, 1);
+info = init_info();
+info.method = 'partial-block';
+info.block_info = cell(1, k);
+
+alpha0 = get_cached_alpha0(cache_state, model.nMom);
+
+all_converged = true;
+max_iter = 0;
+max_reg = 0.0;
+any_vac = false;
+all_crit1 = true;
+all_crit2 = true;
+any_iso_fallback = false;
+
+for ib = 1:k
+    idx = (2 * ib - 1):(2 * ib);
+    block_model = build_partial_block_model(model, ib);
+    block_quad.B = quad.local_B_by_interval{ib};
+    block_quad.w = quad.local_w_by_interval{ib};
+
+    block_cache = struct();
+    if numel(alpha0) == model.nMom
+        block_cache.last_alpha = alpha0(idx);
+        block_cache.alpha0 = alpha0(idx);
+    end
+
+    a = block_model.mu_edges(1);
+    b = block_model.mu_edges(2);
+    check_fun = @(v) check_partial_block_realizable(v, a, b);
+    [alpha_b, info_b] = solve_entropy_problem(u(idx), block_model, block_quad.B, block_quad.w, opt, block_cache, check_fun);
+
+    alpha(idx) = alpha_b(:);
+    info.block_info{ib} = info_b;
+    all_converged = all_converged && info_b.converged;
+    max_iter = max(max_iter, info_b.iterations);
+    max_reg = max(max_reg, info_b.regularization_r);
+    any_vac = any_vac || info_b.vacuum_regularized;
+    all_crit1 = all_crit1 && info_b.criterion1;
+    all_crit2 = all_crit2 && info_b.criterion2;
+    any_iso_fallback = any_iso_fallback || info_b.used_isotropic_fallback;
+end
+
+info.converged = all_converged;
+info.iterations = max_iter;
+info.regularization_r = max_reg;
+info.vacuum_regularized = any_vac;
+info.criterion1 = all_crit1;
+info.criterion2 = all_crit2;
+info.used_isotropic_fallback = any_iso_fallback;
+info.cached_alpha = alpha;
+end
+
+function [alpha, info] = solve_entropy_problem(u, model, B, w, opt, cache_state, check_fun)
+u = u(:);
+B = B;
+w = w(:);
+n = model.nMom;
+
+info = init_info();
 
 rho = model.alpha1.' * u;
 if rho <= 0
@@ -43,17 +108,11 @@ if rho < opt.rho_vac
     info.vacuum_regularized = true;
 end
 
-% The normalized problem has rho(phi)=1, so the isotropic multiplier is
-% alpha1*log(1/<1>) rather than zero.
 beta0 = model.alpha1 * log(1.0 / model.h1);
-if isfield(cache_state, 'last_alpha') && numel(cache_state.last_alpha) == n
-    beta0 = cache_state.last_alpha(:);
-elseif isfield(cache_state, 'alpha0') && numel(cache_state.alpha0) == n
-    beta0 = cache_state.alpha0(:);
+alpha_cache = get_cached_alpha0(cache_state, n);
+if numel(alpha_cache) == n
+    beta0 = alpha_cache(:);
 end
-
-B = quad.B;
-w = quad.w;
 
 for rr = 1:numel(opt.regularization_r)
     r = opt.regularization_r(rr);
@@ -65,7 +124,6 @@ for rr = 1:numel(opt.regularization_r)
     d_last = zeros(n, 1);
 
     for k = 1:opt.max_iter
-        % u(beta)=<b exp(b·beta)> and g(beta)=u(beta)-phi, cf. Eq. (4.20).
         z = B * beta;
         ez = safe_exp(z);
 
@@ -74,12 +132,10 @@ for rr = 1:numel(opt.regularization_r)
         gnorm = norm(g, 2);
 
         tau0 = compute_tau0(phi, rho_try, opt.tau, model);
-        % First stopping criterion (Eq. (4.25a) with practical tau0 from Section 5.1).
         crit1 = gnorm < min(tau0, opt.tau);
 
         if crit1
             varrho = sum(w .* ez);
-            % Rescaling of multipliers to preserve local density, Eq. (4.23).
             alpha_try = beta + model.alpha1 * log(rho_try / varrho);
             u_alpha = B.' * (w .* safe_exp(B * alpha_try));
 
@@ -90,8 +146,7 @@ for rr = 1:numel(opt.regularization_r)
 
             crit2 = true;
             if need_check
-                % Practical realizability safeguard, Eq. (5.5) variant.
-                [crit2, ~] = mm_is_realizable(u_try - (1 - opt.eps_gamma) * u_alpha, model, quad, struct('epsR', 0));
+                crit2 = check_fun(u_try - (1 - opt.eps_gamma) * u_alpha);
             end
 
             info.criterion1 = crit1;
@@ -111,15 +166,12 @@ for rr = 1:numel(opt.regularization_r)
             break;
         end
 
-        % Hessian H=<b b^T exp(b·beta)>, Eq. (4.21).
-        H = B.' * (((w .* ez) .* B));
-
+        H = weighted_basis_gram(B, w .* ez);
         d = compute_newton_direction(H, g, opt.use_change_of_basis);
         if any(~isfinite(d))
             break;
         end
 
-        % Dual objective p(beta), Eq. (4.19).
         p0 = sum(w .* ez) - phi.' * beta;
         step = 1.0;
         accepted = false;
@@ -147,59 +199,113 @@ for rr = 1:numel(opt.regularization_r)
     end
 end
 
-% Fallback to isotropic multiplier.
 rho_fallback = max(model.alpha1.' * u, opt.rho_vac);
 alpha = model.alpha1 * log(rho_fallback / model.h1);
 info.converged = false;
 info.used_isotropic_fallback = true;
 info.cached_alpha = alpha;
+end
 
+function info = init_info()
+info = struct();
+info.converged = false;
+info.iterations = 0;
+info.regularization_r = NaN;
+info.vacuum_regularized = false;
+info.criterion1 = false;
+info.criterion2 = false;
+info.used_isotropic_fallback = false;
+info.used_linear_closure = false;
+info.cached_alpha = [];
 end
 
 function d = compute_newton_direction(H, g, use_change_of_basis)
-
 reg = 1.0e-12;
 n = size(H, 1);
 
 if use_change_of_basis
-    dH = diag(H);
-    s = 1 ./ sqrt(max(dH, 1e-30));
-    S = diag(s);
-    Hs = S * H * S;
-    gs = S * g;
-    Hs = Hs + reg * eye(n);
-    ds = solve_linear(Hs, -gs);
-    d = S * ds;
+    dH = full(diag(H));
+    s = 1 ./ sqrt(max(dH, 1.0e-30));
+    Hs = H .* (s * s.');
+    gs = s .* g;
+    Hs = Hs + reg * speye(n);
+    ds = solve_linear(Hs, -gs, reg);
+    d = s .* ds;
 else
-    H = H + reg * eye(n);
-    d = solve_linear(H, -g);
+    H = H + reg * speye(n);
+    d = solve_linear(H, -g, reg);
 end
 end
 
-function x = solve_linear(A, b)
+function x = solve_linear(A, b, reg)
 n = size(A, 1);
 if size(A, 2) ~= n
-    x = pinv(A) * b;
+    x = A \ b;
+    if any(~isfinite(x))
+        x = pinv(full(A)) * b;
+    end
     return;
 end
 
-rA = rcond(A);
-if ~isfinite(rA) || rA < 1.0e-12
-    % Avoid warning storms from near-singular solves in long PMMn runs.
-    regA = max(1.0e-12, 1.0e-10 * norm(A, 1));
-    Areg = A + regA * eye(n);
-    rReg = rcond(Areg);
-    if isfinite(rReg) && rReg >= 1.0e-12
-        x = Areg \ b;
-    else
-        x = pinv(A) * b;
-    end
+[L, p] = chol(A, 'lower');
+if p == 0
+    x = L' \ (L \ b);
 else
-    x = A \ b;
+    regA = max(reg, 1.0e-10 * max(1.0, norm(A, 1)));
+    x = (A + regA * speye(n)) \ b;
 end
 
 if any(~isfinite(x))
-    x = pinv(A) * b;
+    x = pinv(full(A)) * b;
+end
+end
+
+function G = weighted_basis_gram(B, weights)
+weights = weights(:);
+if issparse(B)
+    G = B.' * spdiags(weights, 0, numel(weights), numel(weights)) * B;
+else
+    G = B.' * bsxfun(@times, weights, B);
+end
+G = 0.5 * (G + G.');
+end
+
+function tf = check_partial_block_realizable(u, a, b)
+u = u(:);
+u0 = u(1);
+u1 = u(2);
+tf = (u0 > 0) && ((u1 - a * u0) > 0) && ((b * u0 - u1) > 0);
+end
+
+function block_model = build_partial_block_model(model, ib)
+a = model.mu_edges(ib);
+b = model.mu_edges(ib + 1);
+h = b - a;
+m1 = 0.5 * (b^2 - a^2) / h;
+
+block_model = struct();
+block_model.nMom = 2;
+block_model.alpha1 = [1.0; 0.0];
+block_model.h1 = h;
+block_model.u_iso_vec = [1.0; m1];
+block_model.G = block_model.u_iso_vec * block_model.alpha1.';
+block_model.is_hat = false;
+block_model.family = 'partial';
+block_model.mu_edges = [a; b];
+end
+
+function alpha0 = get_cached_alpha0(cache_state, n)
+alpha0 = [];
+if isfield(cache_state, 'last_alpha') && numel(cache_state.last_alpha) == n
+    alpha0 = cache_state.last_alpha(:);
+elseif isfield(cache_state, 'alpha0') && numel(cache_state.alpha0) == n
+    alpha0 = cache_state.alpha0(:);
+elseif isfield(cache_state, 'alpha') && numel(cache_state.alpha) == n
+    alpha0 = cache_state.alpha(:);
+elseif isfield(cache_state, 'alpha_cells') && size(cache_state.alpha_cells, 2) == 1 && size(cache_state.alpha_cells, 1) == n
+    alpha0 = cache_state.alpha_cells(:, 1);
+elseif isfield(cache_state, 'last_alpha_cells') && size(cache_state.last_alpha_cells, 2) == 1 && size(cache_state.last_alpha_cells, 1) == n
+    alpha0 = cache_state.last_alpha_cells(:, 1);
 end
 end
 

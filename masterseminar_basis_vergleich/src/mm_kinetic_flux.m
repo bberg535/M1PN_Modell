@@ -26,6 +26,9 @@ if model.needs_entropy
     if ~isempty(alphaL_pre)
         alphaL = alphaL_pre(:);
         infoL = infoL_pre;
+    elseif isfield(cacheL, 'alpha') && numel(cacheL.alpha) == model.nMom
+        alphaL = cacheL.alpha(:);
+        infoL = get_field_or(cacheL, 'info', infoL_pre);
     else
         [alphaL, infoL] = mm_entropy_dual_solve(uL, model, quad, opt_cfg, cacheL);
     end
@@ -33,6 +36,9 @@ if model.needs_entropy
     if ~isempty(alphaR_pre)
         alphaR = alphaR_pre(:);
         infoR = infoR_pre;
+    elseif isfield(cacheR, 'alpha') && numel(cacheR.alpha) == model.nMom
+        alphaR = cacheR.alpha(:);
+        infoR = get_field_or(cacheR, 'info', infoR_pre);
     else
         [alphaR, infoR] = mm_entropy_dual_solve(uR, model, quad, opt_cfg, cacheR);
     end

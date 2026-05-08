@@ -38,9 +38,12 @@ end
 
 quad.mu = mu(:);
 quad.w = w(:);
-if model.is_partial
-    quad.B = build_partial_basis_with_interval_ids(model, quad.mu, interval_id(:));
-    quad.interval_index = interval_id(:);
+if ismember(model.family, {'hat', 'partial'})
+    quad.interval_id = interval_id(:);
+    quad.interval_index = quad.interval_id;
+    [quad.B, quad.local_mu_by_interval, quad.local_w_by_interval, ...
+        quad.local_B_by_interval, quad.local_cols_by_interval, quad.interval_qidx] = ...
+        build_local_piecewise_basis(model, quad.mu, quad.w, quad.interval_id);
 else
     quad.B = model.basis_eval(quad.mu);
 end
@@ -53,6 +56,10 @@ quad.B_plus = quad.B(pos, :);
 quad.mu_minus = quad.mu(neg);
 quad.w_minus = quad.w(neg);
 quad.B_minus = quad.B(neg, :);
+
+if ~model.needs_entropy
+    quad.linear_char = build_linear_characteristic_data(model, quad);
+end
 
 end
 
@@ -76,19 +83,147 @@ for j = 1:(numel(edges) - 1)
 end
 end
 
-function B = build_partial_basis_with_interval_ids(model, mu, interval_id)
+function [B, local_mu, local_w, local_B, local_cols, interval_qidx] = build_local_piecewise_basis(model, mu, w, interval_id)
 nQ = numel(mu);
-B = zeros(nQ, model.nMom);
+nIntervals = numel(model.mu_edges) - 1;
+row_idx = [];
+col_idx = [];
+val = [];
 
-for q = 1:nQ
-    j = interval_id(q);
-    if j < 1 || j > model.kIntervals
-        continue;
+local_mu = cell(1, nIntervals);
+local_w = cell(1, nIntervals);
+local_B = cell(1, nIntervals);
+local_cols = cell(1, nIntervals);
+interval_qidx = cell(1, nIntervals);
+
+for j = 1:nIntervals
+    qidx = find(interval_id == j);
+    interval_qidx{j} = qidx(:);
+    mu_j = mu(qidx);
+    w_j = w(qidx);
+    local_mu{j} = mu_j(:);
+    local_w{j} = w_j(:);
+
+    switch model.family
+        case 'partial'
+            cols = [2 * j - 1, 2 * j];
+            Bj = [ones(numel(mu_j), 1), mu_j(:)];
+
+        case 'hat'
+            cols = [j, j + 1];
+            a = model.mu_edges(j);
+            b = model.mu_edges(j + 1);
+            h = b - a;
+            Bj = [(b - mu_j(:)) / h, (mu_j(:) - a) / h];
+
+        otherwise
+            error('Unsupported piecewise family: %s', model.family);
     end
-    col = 2 * j - 1;
-    B(q, col) = 1.0;
-    B(q, col + 1) = mu(q);
+
+    local_B{j} = Bj;
+    local_cols{j} = cols;
+
+    if ~isempty(qidx)
+        nLoc = numel(qidx);
+        col_block = repmat(cols(:).', nLoc, 1);
+        row_block = repmat(qidx(:), 1, numel(cols));
+        row_idx = [row_idx; row_block(:)]; %#ok<AGROW>
+        col_idx = [col_idx; col_block(:)]; %#ok<AGROW>
+        val = [val; Bj(:)]; %#ok<AGROW>
+    end
 end
+
+B = sparse(row_idx, col_idx, val, nQ, model.nMom);
+end
+
+function char_data = build_linear_characteristic_data(model, quad)
+char_data = struct('constant', true, 'success', false, 'method', 'linear-generalized', ...
+    'V', [], 'Vinv', [], 'lambda', [], 'Z', [], 'K_flux', [], 'M', model.mass_matrix);
+
+K_flux = weighted_basis_gram(quad.B, quad.w(:) .* quad.mu(:));
+[V, Vinv, lambda, Z, ok] = solve_generalized_constant(K_flux, model.mass_matrix);
+
+char_data.K_flux = K_flux;
+char_data.J = K_flux;
+char_data.H = model.mass_matrix;
+if ok
+    char_data.success = true;
+    char_data.V = V;
+    char_data.Vinv = Vinv;
+    char_data.lambda = lambda;
+    char_data.Z = Z;
+end
+end
+
+function G = weighted_basis_gram(B, weights)
+weights = weights(:);
+if issparse(B)
+    G = B.' * spdiags(weights, 0, numel(weights), numel(weights)) * B;
+else
+    G = B.' * bsxfun(@times, weights, B);
+end
+G = 0.5 * (G + G.');
+end
+
+function [V, Vinv, lambda, Z, ok] = solve_generalized_constant(J, H)
+n = size(H, 1);
+V = eye(n);
+Vinv = eye(n);
+lambda = zeros(n, 1);
+Z = eye(n);
+ok = false;
+
+if any(~isfinite(J(:))) || any(~isfinite(H(:)))
+    return;
+end
+
+[R, p] = chol(full(H));
+if p ~= 0
+    shift = max(1.0e-14, 1.0e-12 * max(1.0, norm(H, Inf)));
+    [R, p] = chol(full(H + shift * speye(n)));
+    if p ~= 0
+        return;
+    end
+end
+
+S = R' \ (full(J) / R);
+S = 0.5 * (S + S.');
+[Y, D] = eig(S);
+lambda = real(diag(D));
+if any(~isfinite(Y(:))) || any(~isfinite(lambda))
+    return;
+end
+
+[lambda, idx] = sort(lambda, 'ascend');
+Z = R \ real(Y(:, idx));
+V = real(R' * Y(:, idx));
+[V, Z, ok] = normalize_basis_columns(V, Z);
+if ~ok
+    return;
+end
+
+Vinv = V \ eye(n);
+ok = all(isfinite(Vinv(:)));
+end
+
+function [V, Z, ok] = normalize_basis_columns(V, Z)
+ok = false;
+for j = 1:size(V, 2)
+    v = real(V(:, j));
+    nv = norm(v);
+    if ~isfinite(nv) || nv <= 0
+        return;
+    end
+    v = v / nv;
+    Z(:, j) = Z(:, j) / nv;
+    [~, imax] = max(abs(v));
+    if ~isempty(imax) && v(imax) < 0
+        v = -v;
+        Z(:, j) = -Z(:, j);
+    end
+    V(:, j) = v;
+end
+ok = all(isfinite(V(:))) && all(isfinite(Z(:)));
 end
 
 function [x, w] = gauss_lobatto(n, a, b)

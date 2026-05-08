@@ -20,8 +20,9 @@ ctx.mode = normalize_mode(get_field_or(par_cfg, 'mode', 'single_run'));
 ctx.num_workers = get_field_or(par_cfg, 'num_workers', 0);
 ctx.pool_type = get_field_or(par_cfg, 'pool_type', 'local');
 ctx.allow_fp_drift = logical(get_field_or(par_cfg, 'allow_fp_drift', true));
-ctx.min_cells = get_field_or(par_cfg, 'min_cells', 128);
-ctx.min_interfaces = get_field_or(par_cfg, 'min_interfaces', 128);
+ctx.min_cells = get_field_or(par_cfg, 'min_cells', 256);
+ctx.min_interfaces = get_field_or(par_cfg, 'min_interfaces', 256);
+ctx.min_directions = get_field_or(par_cfg, 'min_directions', ctx.min_cells);
 ctx.work_kind = lower(char(work_kind));
 ctx.work_size = work_size;
 ctx.threshold = threshold_for_kind(ctx, ctx.work_kind);
@@ -78,7 +79,7 @@ switch work_kind
     case 'interfaces'
         thr = ctx.min_interfaces;
     case 'directions'
-        thr = ctx.min_cells;
+        thr = ctx.min_directions;
     case 'ensemble'
         thr = 2;
     otherwise

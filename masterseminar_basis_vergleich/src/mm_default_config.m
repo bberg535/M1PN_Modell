@@ -40,6 +40,11 @@ cfg.optimizer.use_change_of_basis = true;
 % first-order partial moments.
 cfg.optimizer.use_change_of_basis_partial_entropy = true;
 cfg.optimizer.change_of_basis_cond = 1.0e10;
+% Keep expensive characteristic verification out of production runs unless
+% explicitly requested.
+cfg.optimizer.check_eigen_residual = false;
+cfg.optimizer.check_basis_condition = false;
+cfg.optimizer.safe_characteristic_fallback = true;
 
 cfg.reconstruction = struct();
 cfg.reconstruction.use_characteristic = true;
@@ -52,7 +57,7 @@ cfg.limiter.type = 'paper';
 cfg.limiter.epsR = 1.0e-11;
 cfg.limiter.eps_theta = 1.0e-11;
 cfg.limiter.lp_bisect_iter = 32;
-cfg.limiter.mcl_bisect_iter = 40;
+cfg.limiter.mcl_bisect_iter = 20;
 cfg.limiter.mcl_lambda = 1.0;
 % Optional paper-style LP limiter in characteristic components (Eq. 5.25-like).
 cfg.limiter.paper_lp_characteristic = true;
@@ -66,12 +71,13 @@ cfg.parallel = struct();
 cfg.parallel.enabled = false;
 cfg.parallel.mode = 'single_run';
 cfg.parallel.num_workers = 0;
-cfg.parallel.min_cells = 128;
-cfg.parallel.min_interfaces = 128;
+cfg.parallel.min_cells = 256;
+cfg.parallel.min_interfaces = 256;
 cfg.parallel.pool_type = 'local';
 cfg.parallel.allow_fp_drift = true;
 % PMMn entropy runs are sensitive; keep inner loops serial by default.
 cfg.parallel.force_serial_partial_entropy = true;
+cfg.parallel.min_directions = 256;
 
 cfg.physics = struct();
 cfg.physics.psi_vac_density = 1.0e-8 / 2.0;

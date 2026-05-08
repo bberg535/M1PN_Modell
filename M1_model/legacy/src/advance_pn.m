@@ -22,7 +22,6 @@ vlc = v(:,ip0c); vrc = v(:,ip1c);
 
 % Flussfunktion und -geschwindigkeit
 flux = @(v) (xi.*v); fluxj = @(v) xi;
-%flux = @(v) (v); fluxj = @(v) 1;
 lambdaMCL=max(abs(fluxj(vlc)),abs(fluxj(vrc)));
 
 % Central difference flux
@@ -35,37 +34,19 @@ fLF=fCD-0.5*lambdaMCL.*(vrc-vlc);
 fLW=fCD-0.5*cfl*(lambdaMCL.^2).*(vrc-vlc);
 
 if method == 1
-
-    % Antidiffusive flux
     fAe=fLF-fLW;
-
-    % Local bounds
     umax=max(v(:,im1c),max(v(:,ip0c),v(:,ip1c)));
     umin=min(v(:,im1c),min(v(:,ip0c),v(:,ip1c)));
-
-    % Scaled bar states
     wbar=0.5*(vrc+vlc).*lambdaMCL-0.5*(flux(vrc)-flux(vlc));
-
-    % Flux limiting
     fAe=min(max(0,fAe),min(lambdaMCL.*umax(:,ip0c)-wbar,wbar-lambdaMCL.*umin(:,ip1c))) ...
         +max(min(0,fAe),max(lambdaMCL.*umin(:,ip0c)-wbar,wbar-lambdaMCL.*umax(:,ip1c)));
-
-    % Flux correction
     fMCL=fLF-fAe;
-
 elseif method == -1
-
     fMCL=fLF;      
-
 else
-
     fMCL=fLW;
-
 end
 
-% Berechne Rechte-Seite
 rhs_v(:,ip0c) = -(fMCL(:,ip0c) - fMCL(:,im1c)) / dz;
-
-% Transformiere in den Momentenraum
 u = R * rhs_v;  
 end

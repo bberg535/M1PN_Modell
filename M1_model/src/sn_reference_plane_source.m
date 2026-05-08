@@ -6,6 +6,10 @@ function ref = sn_reference_plane_source(cfg_ref)
 %   - isotropic split Dirac initial condition,
 %   - vacuum boundary values,
 %   - sigma_s = 1, sigma_a = 0, Q = 0.
+%   The initialization convention can be switched via cfg_ref.init_mode:
+%   - 'physical'     : rho has total unit mass (psi increment 1/(4*dz)),
+%   - 'master_basis' : matches masterseminar_basis_vergleich exactly
+%                      (psi increment 1/(2*dz)).
 
     if nargin < 1
         cfg_ref = struct();
@@ -19,6 +23,7 @@ function ref = sn_reference_plane_source(cfg_ref)
     nMu = get_field_or(cfg_ref, 'n_mu', 256);
     cfl = get_field_or(cfg_ref, 'cfl', 0.45);
     psi_vac = get_field_or(cfg_ref, 'psi_vac_density', 0.5e-8);
+    init_mode = lower(get_field_or(cfg_ref, 'init_mode', 'physical'));
 
     if mod(nCells, 2) ~= 0
         error('sn_reference_plane_source:oddCellCount', ...
@@ -37,12 +42,17 @@ function ref = sn_reference_plane_source(cfg_ref)
     max_speed = max(abs(mu));
 
     psi = psi_vac * ones(nMu, nCells);
-    iL = nCells / 2;
-    iR = iL + 1;
-    % rho is the angular integral over [-1, 1], so an isotropic density
-    % increment rho_cell must be represented by psi = rho_cell / 2.
-    psi(:, iL) = psi(:, iL) + 1.0 / (4.0 * dz);
-    psi(:, iR) = psi(:, iR) + 1.0 / (4.0 * dz);
+    [~, iCenter] = min(abs(z));
+    if z(iCenter) <= 0
+        iL = iCenter;
+        iR = min(nCells, iCenter + 1);
+    else
+        iR = iCenter;
+        iL = max(1, iCenter - 1);
+    end
+    psi_increment = split_dirac_increment(dz, init_mode);
+    psi(:, iL) = psi(:, iL) + psi_increment;
+    psi(:, iR) = psi(:, iR) + psi_increment;
 
     t = 0.0;
     while t < tf - 1e-14
@@ -70,6 +80,7 @@ function ref = sn_reference_plane_source(cfg_ref)
     ref.t = t;
     ref.mu = mu;
     ref.w = w;
+    ref.init_mode = init_mode;
 
     function rhs = rhs_sn(psi_state)
         rho_state = w.' * psi_state;
@@ -92,6 +103,23 @@ function ref = sn_reference_plane_source(cfg_ref)
         end
 
         rhs = adv + src;
+    end
+end
+
+function psi_increment = split_dirac_increment(dz, init_mode)
+    switch init_mode
+        case 'physical'
+            % rho is the angular integral over [-1, 1], so an isotropic
+            % density increment rho_cell is represented by psi = rho_cell / 2.
+            psi_increment = 1.0 / (4.0 * dz);
+
+        case 'master_basis'
+            % Matches masterseminar_basis_vergleich exactly.
+            psi_increment = 1.0 / (2.0 * dz);
+
+        otherwise
+            error('sn_reference_plane_source:unknownInitMode', ...
+                'Unknown plane-source init_mode "%s".', init_mode);
     end
 end
 

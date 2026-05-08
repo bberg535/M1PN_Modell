@@ -2,11 +2,7 @@ function obs = pn_observables(uPN)
 %PN_OBSERVABLES Compute rho, j and m2 from PN moments via quadrature reconstruction.
 
     N = size(uPN, 1) - 1;
-    [xi, w] = gausslegendre(N + 1);
-    P = legpoly_eval(xi, N);
-    G = diag(2 ./ (2 .* (0:N) + 1));
-    L = (G \ P).';
-
+    [xi, w, ~, L] = pn_basis(N);
     v = L * uPN;
 
     obs = struct();
