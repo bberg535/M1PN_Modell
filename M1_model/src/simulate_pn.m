@@ -19,26 +19,14 @@ function uPN = simulate_pn(rho0, dt, dz, num_steps, N, method, sigma_a, sigma_s,
     uPN(1, :) = reshape(rho0, 1, []);
 
     for step = 1:num_steps
-        k1 = transport_rhs(uPN, N, method, dt, dz, boundary, psi_boundary);
-        uPN1 = uPN + dt * k1;
-        uPN1 = pn_relax_isotropic(uPN1, N, dt, sigma_a, sigma_s, q);
-
-        k2 = transport_rhs(uPN1, N, method, dt, dz, boundary, psi_boundary);
-        uPN2 = uPN1 + dt * k2;
-        uPN2 = pn_relax_isotropic(uPN2, N, dt, sigma_a, sigma_s, q);
-
-        uPN = 0.5 * (uPN + uPN2);
+        uPN = pn_heun_step(uPN, dt, dz, N, method, sigma_a, sigma_s, q, ...
+            boundary, psi_boundary);
 
         if any(~isfinite(uPN(:))) || any(~isreal(uPN(:)))
             error('simulate_pn:invalidState', ...
                 'PN state became invalid at step %d.', step);
         end
     end
-end
-
-function rhs = transport_rhs(uPN, N, method, dt, dz, boundary, psi_boundary)
-    flux = pn_interface_flux(uPN, N, method, dt, dz, boundary, psi_boundary);
-    rhs = -(flux(:, 2:end) - flux(:, 1:end-1)) / dz;
 end
 
 function field = reshape_cell_field(field, nec, error_id)

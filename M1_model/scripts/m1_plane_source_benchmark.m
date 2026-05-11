@@ -20,7 +20,22 @@ compare_models = struct( ...
 pn_ilim = -2;
 pn_order = 9;
 m1pn_order = 13;
-m1pn_pn_ho_method = 1;
+% PN transport method used inside M1PN:
+% - 'MCL'
+% - 'LLF'
+% - 'LW'
+m1pn_pn_ho_method = 'MCL';
+% M1PN coupling modes to compare:
+% - 'explicit_failsafe' (current default path)
+% - 'explicit_synced'
+% - 'implicit_holo'
+% Example:
+% m1pn_coupling_modes = {'explicit_failsafe', 'explicit_synced', 'implicit_holo'};
+m1pn_coupling_modes = {'implicit_holo'};
+% Optional extra parameters for all selected M1PN coupling modes.
+% Example:
+% m1pn_mode_opts = struct('holo_outer_max_iters', 12, 'holo_tol', 1.0e-4);
+m1pn_mode_opts = struct();
 
 case_cfg = plane_source_master_case();
 z = case_cfg.z;
@@ -53,7 +68,9 @@ if compare_models.lw
     ilim_values(end + 1) = -2;
 end
 
-num_result_slots = numel(ilim_values) + compare_models.pn + compare_models.m1pn;
+m1pn_mode_list = normalize_mode_list(m1pn_coupling_modes);
+num_m1pn_results = compare_models.m1pn * numel(m1pn_mode_list);
+num_result_slots = numel(ilim_values) + compare_models.pn + num_m1pn_results;
 if num_result_slots == 0
     error('m1_plane_source_benchmark:noModelsSelected', ...
         'At least one supported model must be enabled in compare_models.');
@@ -61,7 +78,7 @@ end
 
 results = repmat(struct('name', '', 'rho', [], 'j', [], 'm2', [], ...
     'rho_l1', [], 'rho_linf', [], 'j_l1', [], 'j_linf', [], ...
-    'm2_l1', [], 'm2_linf', []), 1, num_result_slots);
+    'm2_l1', [], 'm2_linf', [], 'diag', struct()), 1, num_result_slots);
 result_idx = 0;
 
 for k = 1:numel(ilim_values)
@@ -72,7 +89,7 @@ for k = 1:numel(ilim_values)
     result_idx = result_idx + 1;
     results(result_idx) = make_result(method_name(ilim), ...
         u(1, :)', u(2, :)', m2(:), ...
-        rho_ref, j_ref, m2_ref, dz);
+        rho_ref, j_ref, m2_ref, dz, struct());
 end
 
 if compare_models.pn
@@ -82,19 +99,26 @@ if compare_models.pn
     result_idx = result_idx + 1;
     results(result_idx) = make_result(sprintf('PN-%s', method_name(pn_ilim)), ...
         obs_pn.rho, obs_pn.j, obs_pn.m2, ...
-        rho_ref, j_ref, m2_ref, dz);
+        rho_ref, j_ref, m2_ref, dz, struct());
 end
 
 if compare_models.m1pn
-    m1pn_opts = vacuum_opts;
-    m1pn_opts.pn_ho_method = m1pn_pn_ho_method;
-    [u_m1pn, ~] = simulate_m1pn(rho0, dt, dz, num_steps, m1pn_order, ...
-        sigma_a, sigma_s, source_strength, m1pn_opts);
-    m2_m1pn = calc_psi2(u_m1pn);
-    result_idx = result_idx + 1;
-    results(result_idx) = make_result('M1PN-HOLO', ...
-        u_m1pn(1, :)', u_m1pn(2, :)', m2_m1pn(:), ...
-        rho_ref, j_ref, m2_ref, dz);
+    m1pn_pn_ho_method_id = normalize_flux_method(m1pn_pn_ho_method);
+    m1pn_pn_ho_method_name = method_name(m1pn_pn_ho_method_id);
+    for mode_idx = 1:numel(m1pn_mode_list)
+        m1pn_mode = m1pn_mode_list{mode_idx};
+        m1pn_opts = vacuum_opts;
+        m1pn_opts.pn_ho_method = m1pn_pn_ho_method_id;
+        m1pn_opts.coupling_mode = m1pn_mode;
+        m1pn_opts = merge_structs(m1pn_opts, m1pn_mode_opts);
+        [u_m1pn, ~, m1pn_diag] = simulate_m1pn(rho0, dt, dz, num_steps, m1pn_order, ...
+            sigma_a, sigma_s, source_strength, m1pn_opts);
+        m2_m1pn = calc_psi2(u_m1pn);
+        result_idx = result_idx + 1;
+        results(result_idx) = make_result(m1pn_result_name(m1pn_mode, m1pn_pn_ho_method_name), ...
+            u_m1pn(1, :)', u_m1pn(2, :)', m2_m1pn(:), ...
+            rho_ref, j_ref, m2_ref, dz, summarize_m1pn_diag(m1pn_diag));
+    end
 end
 
 results = results(1:result_idx);
@@ -108,6 +132,13 @@ for k = 1:numel(results)
         results(k).rho_l1, results(k).rho_linf, ...
         results(k).j_l1, results(k).j_linf, ...
         results(k).m2_l1, results(k).m2_linf);
+    if ~isempty(fieldnames(results(k).diag))
+        fprintf(['  diag: fallback steps = %d, mean outer iters = %.3f, ' ...
+            'max sync correction = %.6e\n'], ...
+            results(k).diag.fallback_steps, ...
+            results(k).diag.mean_outer_iterations, ...
+            results(k).diag.max_sync_correction);
+    end
 end
 
 %% Plots
@@ -161,7 +192,88 @@ function name = method_name(ilim)
     end
 end
 
-function result = make_result(name, rho, j, m2, rho_ref, j_ref, m2_ref, dz)
+function name = m1pn_result_name(coupling_mode, pn_method_name)
+    switch lower(strtrim(coupling_mode))
+        case 'explicit_failsafe'
+            coupling_label = 'M1PN-HOLO-explicit';
+        case 'explicit_synced'
+            coupling_label = 'M1PN-HOLO-sync';
+        case 'implicit_holo'
+            coupling_label = 'M1PN-HOLO-implicit';
+        otherwise
+            coupling_label = sprintf('M1PN-%s', coupling_mode);
+    end
+    name = sprintf('%s/PN-%s', coupling_label, pn_method_name);
+end
+
+function mode_list = normalize_mode_list(raw_modes)
+    if ischar(raw_modes) || isstring(raw_modes)
+        mode_list = cellstr(raw_modes);
+        return;
+    end
+
+    if ~iscell(raw_modes) || isempty(raw_modes)
+        error('m1_plane_source_benchmark:invalidM1PNModes', ...
+            'm1pn_coupling_modes must be a non-empty string or cell array of strings.');
+    end
+
+    mode_list = raw_modes;
+end
+
+function method_id = normalize_flux_method(raw_method)
+    if isstring(raw_method)
+        raw_method = char(raw_method);
+    end
+
+    if ischar(raw_method)
+        switch upper(strtrim(raw_method))
+            case 'MCL'
+                method_id = 1;
+            case 'LLF'
+                method_id = -1;
+            case 'LW'
+                method_id = -2;
+            otherwise
+                error('m1_plane_source_benchmark:invalidM1PNPNMethod', ...
+                    'Unknown m1pn_pn_ho_method "%s".', raw_method);
+        end
+        return;
+    end
+
+    if ~isscalar(raw_method)
+        error('m1_plane_source_benchmark:invalidM1PNPNMethod', ...
+            'm1pn_pn_ho_method must be a scalar or one of the strings MCL/LLF/LW.');
+    end
+
+    if any(raw_method == [1, -1, -2])
+        method_id = raw_method;
+    else
+        error('m1_plane_source_benchmark:invalidM1PNPNMethod', ...
+            'Unsupported numeric m1pn_pn_ho_method %g.', raw_method);
+    end
+end
+
+function merged = merge_structs(base_struct, override_struct)
+    merged = base_struct;
+    if isempty(override_struct)
+        return;
+    end
+
+    override_fields = fieldnames(override_struct);
+    for k = 1:numel(override_fields)
+        field_name = override_fields{k};
+        merged.(field_name) = override_struct.(field_name);
+    end
+end
+
+function diag_summary = summarize_m1pn_diag(diag_struct)
+    diag_summary = struct();
+    diag_summary.fallback_steps = nnz(diag_struct.fallback_used);
+    diag_summary.mean_outer_iterations = mean(diag_struct.outer_iterations);
+    diag_summary.max_sync_correction = max(diag_struct.sync_correction);
+end
+
+function result = make_result(name, rho, j, m2, rho_ref, j_ref, m2_ref, dz, diag_summary)
     result = struct();
     result.name = name;
     result.rho = rho(:);
@@ -173,4 +285,5 @@ function result = make_result(name, rho, j, m2, rho_ref, j_ref, m2_ref, dz)
     result.j_linf = max(abs(result.j - j_ref));
     result.m2_l1 = dz * sum(abs(result.m2 - m2_ref));
     result.m2_linf = max(abs(result.m2 - m2_ref));
+    result.diag = diag_summary;
 end
