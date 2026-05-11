@@ -15,7 +15,7 @@ setup_project_paths();
 
 %% Switches
 include_sn_reference = true;
-pn_ilim = 1;
+pn_ilim = -2;
 pn_order = 7;
 m1pn_order = pn_order;
 m1pn_pn_ho_method = 1;

@@ -1,7 +1,7 @@
 % Messung
 tAll = tic;
 
-ilim = 1;
+ilim = -2;
 
 % Größen für die Diskretisierung
 N = 3;
