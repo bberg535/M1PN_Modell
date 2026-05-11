@@ -136,10 +136,7 @@ classdef TestMomentModels < matlab.unittest.TestCase
             Hd = 0.5 * (Hd + Hd.');
             lambdaDense = sort(real(eig(Jd, Hd)), 'ascend');
 
-            % The PMMn block path now uses exact interval moments, while
-            % the dense reference still integrates the same ansatz through
-            % the quadrature rule. Match to quadrature accuracy.
-            testCase.verifyLessThan(norm(sort(st.lambda) - lambdaDense, Inf), 1e-8);
+            testCase.verifyLessThan(norm(sort(st.lambda) - lambdaDense, Inf), 1e-10);
             testCase.verifyLessThan(norm((Jd / Hd) * V - V * diag(st.lambda), Inf), 1e-8);
             testCase.verifyLessThan(norm(Vinv * V - eye(model.nMom), Inf), 1e-8);
         end

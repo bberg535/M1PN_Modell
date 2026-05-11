@@ -181,7 +181,6 @@ row.time_flux_entropy_cell_solves_sum_s = sumStep.flux_entropy_cell_solves_s;
 row.time_flux_characteristic_basis_sum_s = sumStep.flux_characteristic_basis_s;
 row.time_flux_reconstruct_sum_s = sumStep.flux_reconstruct_s;
 row.time_flux_entropy_reconstructed_sum_s = sumStep.flux_entropy_reconstructed_s;
-row.time_flux_limiter_sum_s = sumStep.flux_limiter_s;
 row.time_flux_high_order_flux_sum_s = sumStep.flux_high_order_flux_s;
 row.time_flux_low_order_flux_sum_s = sumStep.flux_low_order_flux_s;
 row.time_flux_mcl_bisection_sum_s = sumStep.flux_mcl_bisection_s;
@@ -228,12 +227,12 @@ end
 
 function print_timing_summary(row)
 fprintf(['[timing] %s-%d: total=%.3fs solver=%.3fs source=%.3fs flux=%.3fs ' ...
-    'cache=%.3fs entropy=%.3fs char=%.3fs rec=%.3fs recEntropy=%.3fs limiter=%.3fs ' ...
+    'cache=%.3fs entropy=%.3fs char=%.3fs rec=%.3fs recEntropy=%.3fs ' ...
     'hi=%.3fs lo=%.3fs bisect=%.3fs rhs=%.3fs\n'], ...
     row.model, row.order, row.runtime_s, row.time_step_sum_s, row.time_source_sum_s, ...
     row.time_flux_sum_s, row.time_flux_stage_cache_sum_s, row.time_flux_entropy_cell_solves_sum_s, ...
     row.time_flux_characteristic_basis_sum_s, row.time_flux_reconstruct_sum_s, ...
-    row.time_flux_entropy_reconstructed_sum_s, row.time_flux_limiter_sum_s, row.time_flux_high_order_flux_sum_s, ...
+    row.time_flux_entropy_reconstructed_sum_s, row.time_flux_high_order_flux_sum_s, ...
     row.time_flux_low_order_flux_sum_s, row.time_flux_mcl_bisection_sum_s, ...
     row.time_flux_rhs_build_sum_s);
 end
@@ -503,7 +502,6 @@ acc.flux_entropy_cell_solves_s = 0.0;
 acc.flux_characteristic_basis_s = 0.0;
 acc.flux_reconstruct_s = 0.0;
 acc.flux_entropy_reconstructed_s = 0.0;
-acc.flux_limiter_s = 0.0;
 acc.flux_high_order_flux_s = 0.0;
 acc.flux_low_order_flux_s = 0.0;
 acc.flux_mcl_bisection_s = 0.0;
@@ -527,7 +525,6 @@ if isfield(state, 'last_flux') && isfield(state.last_flux, 'timing')
     acc.flux_characteristic_basis_s = acc.flux_characteristic_basis_s + get_field_or(ft, 'characteristic_basis_s', 0.0);
     acc.flux_reconstruct_s = acc.flux_reconstruct_s + get_field_or(ft, 'reconstruct_s', 0.0);
     acc.flux_entropy_reconstructed_s = acc.flux_entropy_reconstructed_s + get_field_or(ft, 'entropy_reconstructed_solves_s', 0.0);
-    acc.flux_limiter_s = acc.flux_limiter_s + get_field_or(ft, 'limiter_s', 0.0);
     acc.flux_high_order_flux_s = acc.flux_high_order_flux_s + get_field_or(ft, 'high_order_flux_s', 0.0);
     acc.flux_low_order_flux_s = acc.flux_low_order_flux_s + get_field_or(ft, 'low_order_flux_s', 0.0);
     acc.flux_mcl_bisection_s = acc.flux_mcl_bisection_s + get_field_or(ft, 'mcl_bisection_s', 0.0);

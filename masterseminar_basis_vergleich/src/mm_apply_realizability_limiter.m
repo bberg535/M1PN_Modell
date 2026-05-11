@@ -269,7 +269,7 @@ deltaR = Vinv * (ubar - uR);
 
 M1 = V * diag(deltaL);
 M2 = V * diag(deltaR);
-B = get_lp_matrix(quad);
+B = quad.B.';
 nQ = size(B, 2);
 
 % Eq. (5.25)-style LP for component-wise limiting in characteristic coordinates.
@@ -375,14 +375,6 @@ end
 
 V = Vtry;
 Vinv = VinvTry;
-end
-
-function B = get_lp_matrix(quad)
-if isfield(quad, 'Bt_full') && ~isempty(quad.Bt_full)
-    B = quad.Bt_full;
-else
-    B = full(quad.B.');
-end
 end
 
 function v = get_field_or(s, name, default)
