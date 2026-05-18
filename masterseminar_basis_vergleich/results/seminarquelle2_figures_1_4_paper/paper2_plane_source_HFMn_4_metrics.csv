@@ -1,0 +1,2 @@
+model,order,nMom,L1,Linf,symmetry_L1_rel,min_rho,runtime_s,n_steps,time_reference_s,time_model_build_s,time_quad_build_s,time_solver_total_s,time_step_sum_s,time_source_sum_s,time_flux_sum_s,time_flux_jacobian_sum_s,time_flux_reconstruct_sum_s,time_flux_limiter_flux_sum_s
+HFMn,4,4,1.44118406732266,4.4265638134055,7.39842637517759e-17,1e-08,1440.464199,936,0.335528,0.01203,0.015282,1440.464199,0,0,0,0,0,0

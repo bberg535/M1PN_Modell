@@ -14,12 +14,12 @@ compare_models = struct( ...
     'mcl', false, ...
     'llf', false, ...
     'lw', false, ...
-    'pn', true, ...
+    'pn', false, ...
     'm1pn', true);
 
-pn_ilim = -2;
-pn_order = 9;
-m1pn_order = 13;
+pn_ilim = -21;
+pn_order = 111;
+m1pn_order = 19;
 % PN transport method used inside M1PN:
 % - 'MCL'
 % - 'LLF'
@@ -31,7 +31,7 @@ m1pn_pn_ho_method = 'MCL';
 % - 'implicit_holo'
 % Example:
 % m1pn_coupling_modes = {'explicit_failsafe', 'explicit_synced', 'implicit_holo'};
-m1pn_coupling_modes = {'implicit_holo'};
+m1pn_coupling_modes = {'explicit_synced'};
 % Optional extra parameters for all selected M1PN coupling modes.
 % Example:
 % m1pn_mode_opts = struct('holo_outer_max_iters', 12, 'holo_tol', 1.0e-4);
@@ -55,6 +55,8 @@ sn_ref = sn_reference_plane_source(case_cfg.reference);
 rho_ref = interp1(sn_ref.z, sn_ref.rho, z, 'linear', 'extrap');
 j_ref = interp1(sn_ref.z, sn_ref.j, z, 'linear', 'extrap');
 m2_ref = interp1(sn_ref.z, sn_ref.m2, z, 'linear', 'extrap');
+sn_ref_moments = sn_reference_pn_moments(sn_ref, 2);
+u2_ref = interp1(sn_ref.z, sn_ref_moments(3, :).', z, 'linear', 'extrap');
 
 %% Compare models
 ilim_values = [];
@@ -77,6 +79,7 @@ if num_result_slots == 0
 end
 
 results = repmat(struct('name', '', 'rho', [], 'j', [], 'm2', [], ...
+    'u0', [], 'u1', [], 'u2', [], ...
     'rho_l1', [], 'rho_linf', [], 'j_l1', [], 'j_linf', [], ...
     'm2_l1', [], 'm2_linf', [], 'diag', struct()), 1, num_result_slots);
 result_idx = 0;
@@ -89,6 +92,7 @@ for k = 1:numel(ilim_values)
     result_idx = result_idx + 1;
     results(result_idx) = make_result(method_name(ilim), ...
         u(1, :)', u(2, :)', m2(:), ...
+        u(1, :)', u(2, :)', nan(num_cells, 1), ...
         rho_ref, j_ref, m2_ref, dz, struct());
 end
 
@@ -99,6 +103,7 @@ if compare_models.pn
     result_idx = result_idx + 1;
     results(result_idx) = make_result(sprintf('PN-%s', method_name(pn_ilim)), ...
         obs_pn.rho, obs_pn.j, obs_pn.m2, ...
+        uPN(1, :)', uPN(2, :)', pn_state_component(uPN, 3), ...
         rho_ref, j_ref, m2_ref, dz, struct());
 end
 
@@ -111,12 +116,13 @@ if compare_models.m1pn
         m1pn_opts.pn_ho_method = m1pn_pn_ho_method_id;
         m1pn_opts.coupling_mode = m1pn_mode;
         m1pn_opts = merge_structs(m1pn_opts, m1pn_mode_opts);
-        [u_m1pn, ~, m1pn_diag] = simulate_m1pn(rho0, dt, dz, num_steps, m1pn_order, ...
+        [u_m1pn, uPN_m1pn, m1pn_diag] = simulate_m1pn(rho0, dt, dz, num_steps, m1pn_order, ...
             sigma_a, sigma_s, source_strength, m1pn_opts);
-        m2_m1pn = calc_psi2(u_m1pn);
+        m2_m1pn = m1pn_second_moment(uPN_m1pn);
         result_idx = result_idx + 1;
         results(result_idx) = make_result(m1pn_result_name(m1pn_mode, m1pn_pn_ho_method_name), ...
             u_m1pn(1, :)', u_m1pn(2, :)', m2_m1pn(:), ...
+            uPN_m1pn(1, :)', uPN_m1pn(2, :)', pn_state_component(uPN_m1pn, 3), ...
             rho_ref, j_ref, m2_ref, dz, summarize_m1pn_diag(m1pn_diag));
     end
 end
@@ -179,6 +185,46 @@ end
 hold off
 legend('Location', 'best')
 title('Plane source: m_2 = <\mu^2 u>')
+xlabel('z')
+
+figure;
+subplot(3, 1, 1)
+hold on
+plot(z(plot_mask), rho_ref(plot_mask), 'k', 'LineWidth', 1.5, ...
+    'DisplayName', 'u_0 ref')
+for k = 1:numel(results)
+    plot(z(plot_mask), results(k).u0(plot_mask), 'DisplayName', results(k).name);
+end
+hold off
+legend('Location', 'best')
+title('Plane source: moment u_0')
+xlabel('z')
+
+subplot(3, 1, 2)
+hold on
+plot(z(plot_mask), j_ref(plot_mask), 'k', 'LineWidth', 1.5, ...
+    'DisplayName', 'u_1 ref')
+for k = 1:numel(results)
+    plot(z(plot_mask), results(k).u1(plot_mask), 'DisplayName', results(k).name);
+end
+hold off
+legend('Location', 'best')
+title('Plane source: moment u_1')
+xlabel('z')
+
+subplot(3, 1, 3)
+hold on
+plot(z(plot_mask), u2_ref(plot_mask), 'k', 'LineWidth', 1.5, ...
+    'DisplayName', 'u_2 ref')
+for k = 1:numel(results)
+    if all(isnan(results(k).u2))
+        continue;
+    end
+    plot(z(plot_mask), results(k).u2(plot_mask), 'DisplayName', results(k).name);
+end
+hold off
+legend('Location', 'best')
+title('Plane source: moment u_2 (PN state)')
 xlabel('z')
 
 function name = method_name(ilim)
@@ -273,12 +319,15 @@ function diag_summary = summarize_m1pn_diag(diag_struct)
     diag_summary.max_sync_correction = max(diag_struct.sync_correction);
 end
 
-function result = make_result(name, rho, j, m2, rho_ref, j_ref, m2_ref, dz, diag_summary)
+function result = make_result(name, rho, j, m2, u0, u1, u2, rho_ref, j_ref, m2_ref, dz, diag_summary)
     result = struct();
     result.name = name;
     result.rho = rho(:);
     result.j = j(:);
     result.m2 = m2(:);
+    result.u0 = u0(:);
+    result.u1 = u1(:);
+    result.u2 = u2(:);
     result.rho_l1 = dz * sum(abs(result.rho - rho_ref));
     result.rho_linf = max(abs(result.rho - rho_ref));
     result.j_l1 = dz * sum(abs(result.j - j_ref));
@@ -286,4 +335,13 @@ function result = make_result(name, rho, j, m2, rho_ref, j_ref, m2_ref, dz, diag
     result.m2_l1 = dz * sum(abs(result.m2 - m2_ref));
     result.m2_linf = max(abs(result.m2 - m2_ref));
     result.diag = diag_summary;
+end
+
+function component = pn_state_component(uPN, idx)
+    if size(uPN, 1) < idx
+        component = nan(size(uPN, 2), 1);
+        return;
+    end
+
+    component = uPN(idx, :).';
 end

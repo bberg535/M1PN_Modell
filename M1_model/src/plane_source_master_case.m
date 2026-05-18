@@ -14,7 +14,7 @@ function cfg = plane_source_master_case(varargin)
     cfg.num_cells = 1000;
     cfg.psi_vac = 0.5e-8;
     cfg.sigma_a_value = 0.0;
-    cfg.sigma_s_value = 1.0;
+    cfg.sigma_s_value = 0.0;
     cfg.source_strength = 0.0;
 
     % Matches mm_default_config: solver.cfl_safety and optimizer.eps_gamma.
@@ -74,6 +74,12 @@ function rho0 = build_master_density(z, dz, psi_vac)
     % increment is 1/dz in each of the two center cells.
     rho0(i_left) = rho0(i_left) + 1.0 / dz;
     rho0(i_right) = rho0(i_right) + 1.0 / dz;
+
+    dirac_mass = sum((rho0 - (2 * psi_vac)) * dz);
+    if abs(dirac_mass - 2.0) > 1.0e-12
+        error('plane_source_master_case:diracMassMismatch', ...
+            'Expected split Dirac mass 2 in u_0, observed %.16g.', dirac_mass);
+    end
 end
 
 function cfg = apply_overrides(cfg, varargin)
